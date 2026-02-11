@@ -1,0 +1,20 @@
+name = "mcp-office-converter"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "PLACEHOLDER_KV_ID"
+
+[durable_objects]
+bindings = [
+  { name = "MCP_OBJECT", class_name = "OfficeMCP" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OfficeMCP"]
