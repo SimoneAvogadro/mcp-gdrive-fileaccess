@@ -18,7 +18,7 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.readonly email profile";
 
-const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
+const app = new Hono<{ Bindings: CloudflareEnv & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
 app.get("/authorize", async (c) => {
 	const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
@@ -41,8 +41,8 @@ app.get("/authorize", async (c) => {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		csrfToken,
 		server: {
-			description: "Convert Google Drive files (DOCX, XLSX, PPTX, PDF) to Markdown for Claude.",
-			name: "MCP Office Converter",
+			description: "Search, list, and download Google Drive files in their native format for Claude.",
+			name: "MCP GDrive FileAccess",
 		},
 		setCookie,
 		state: { oauthReqInfo },

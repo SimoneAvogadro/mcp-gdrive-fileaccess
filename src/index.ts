@@ -3,14 +3,28 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
-import { convertFile } from "./converters/index";
 import { createDriveClient, TokenExpiredError } from "./drive/client";
-import { GOOGLE_MIME } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, GOOGLE_EXPORT_MAP, isGoogleWorkspace } from "./drive/types";
 import type { Props } from "./utils";
 
-export class OfficeMCP extends McpAgent<Env, Record<string, never>, Props> {
+const SUPPORTED_BINARY_MIMES: Set<string> = new Set([
+	...Object.values(OFFICE_MIME),
+	OTHER_MIME.PDF,
+	OTHER_MIME.ODS,
+	OTHER_MIME.ODT,
+]);
+
+function isTextMime(mimeType: string): boolean {
+	return mimeType.startsWith("text/");
+}
+
+function isSupportedDirectDownload(mimeType: string): boolean {
+	return SUPPORTED_BINARY_MIMES.has(mimeType) || isTextMime(mimeType) || mimeType.startsWith("image/");
+}
+
+export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Props> {
 	server = new McpServer({
-		name: "MCP Office Converter",
+		name: "MCP GDrive FileAccess",
 		version: "1.0.0",
 	});
 
@@ -73,18 +87,73 @@ export class OfficeMCP extends McpAgent<Env, Record<string, never>, Props> {
 		);
 
 		this.server.tool(
-			"convert_to_markdown",
-			"Download a file from Google Drive and convert it to Markdown. Supports DOCX, XLSX, PPTX, PDF, Google Docs, Google Sheets, Google Slides, HTML, CSV, ODT, ODS, and more.",
+			"download_file",
+			"Download a file from Google Drive in its native format. Supports Office documents (DOC/DOCX, XLS/XLSX, PPT/PPTX), Google Workspace files (exported as Office), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.",
 			{
-				file_id: z.string().describe("Google Drive file ID to download and convert"),
+				file_id: z.string().describe("Google Drive file ID to download"),
 			},
 			async ({ file_id }) => {
 				const drive = this.getDriveClient();
 				try {
 					const file = await drive.getFileMetadata(file_id);
-					const markdown = await convertFile(drive, file, this.env);
+					const mimeType = file.mimeType;
+
+					// Google Workspace → export as Office format
+					if (isGoogleWorkspace(mimeType)) {
+						const exportInfo = GOOGLE_EXPORT_MAP[mimeType];
+						if (!exportInfo) {
+							return {
+								content: [{ type: "text", text: `Unsupported Google Workspace type: ${mimeType}` }],
+								isError: true,
+							};
+						}
+						const buffer = await drive.exportFile(file.id, exportInfo.mimeType);
+						const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+						const fileName = file.name.replace(/\.[^.]*$/, "") + exportInfo.extension;
+						return {
+							content: [{
+								type: "resource",
+								resource: {
+									uri: `drive:///${file.id}/${fileName}`,
+									blob: base64,
+									mimeType: exportInfo.mimeType,
+								},
+							}],
+						};
+					}
+
+					// Text files (plain, CSV, HTML, XML) → return as text content
+					if (isTextMime(mimeType)) {
+						const buffer = await drive.downloadFile(file.id);
+						const text = new TextDecoder().decode(buffer);
+						return {
+							content: [{ type: "text", text }],
+						};
+					}
+
+					// Office, PDF, ODS, ODT, images → direct download as blob
+					if (isSupportedDirectDownload(mimeType)) {
+						const buffer = await drive.downloadFile(file.id);
+						const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+						return {
+							content: [{
+								type: "resource",
+								resource: {
+									uri: `drive:///${file.id}/${file.name}`,
+									blob: base64,
+									mimeType,
+								},
+							}],
+						};
+					}
+
+					// Unsupported type
 					return {
-						content: [{ type: "text", text: markdown }],
+						content: [{
+							type: "text",
+							text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), Google Docs/Sheets/Slides, PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.`,
+						}],
+						isError: true,
 					};
 				} catch (err) {
 					return this.handleDriveError(err);
