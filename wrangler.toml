@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 [[kv_namespaces]]
 binding = "OAUTH_KV"
-id = "MCP_KV_ID"
+id = "b4385b722179437a8e827f199de27580"
 
 [durable_objects]
 bindings = [
