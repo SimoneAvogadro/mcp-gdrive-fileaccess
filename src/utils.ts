@@ -77,6 +77,42 @@ export async function fetchUpstreamAuthToken({
 	return [{ access_token: body.access_token, refresh_token: body.refresh_token }, null];
 }
 
+/**
+ * Uses a refresh token to obtain a new Google access token.
+ */
+export async function refreshAccessToken({
+	client_id,
+	client_secret,
+	refresh_token,
+}: {
+	client_id: string;
+	client_secret: string;
+	refresh_token: string;
+}): Promise<string> {
+	const resp = await fetch("https://oauth2.googleapis.com/token", {
+		method: "POST",
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
+		body: new URLSearchParams({
+			client_id,
+			client_secret,
+			refresh_token,
+			grant_type: "refresh_token",
+		}).toString(),
+	});
+
+	if (!resp.ok) {
+		const text = await resp.text();
+		throw new Error(`Token refresh failed (${resp.status}): ${text}`);
+	}
+
+	const body = (await resp.json()) as { access_token?: string };
+	if (!body.access_token) {
+		throw new Error("No access_token in refresh response");
+	}
+
+	return body.access_token;
+}
+
 export type Props = {
 	email: string;
 	name: string;

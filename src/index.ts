@@ -5,7 +5,7 @@ import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError } from "./drive/client";
 import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME } from "./drive/types";
-import type { Props } from "./utils";
+import { refreshAccessToken, type Props } from "./utils";
 
 const BINARY_MIMES: Set<string> = new Set([
 	...Object.values(OFFICE_MIME),
@@ -43,23 +43,24 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 			{ query: z.string().describe("Search query (keywords to find in file names or content)") },
 			async ({ query }) => {
 				console.log(`[search_drive] query="${query}"`);
-				const drive = this.getDriveClient();
 				try {
-					const files = await drive.searchFiles(query);
-					console.log(`[search_drive] found ${files.length} file(s)`);
-					if (files.length === 0) {
-						return { content: [{ type: "text", text: "No files found matching your query." }] };
-					}
-					const result = files.map((f) => ({
-						id: f.id,
-						name: f.name,
-						type: f.mimeType,
-						modified: f.modifiedTime,
-						size: f.size,
-					}));
-					return {
-						content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					};
+					return await this.withTokenRefresh(async (drive) => {
+						const files = await drive.searchFiles(query);
+						console.log(`[search_drive] found ${files.length} file(s)`);
+						if (files.length === 0) {
+							return { content: [{ type: "text", text: "No files found matching your query." }] };
+						}
+						const result = files.map((f) => ({
+							id: f.id,
+							name: f.name,
+							type: f.mimeType,
+							modified: f.modifiedTime,
+							size: f.size,
+						}));
+						return {
+							content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+						};
+					});
 				} catch (err) {
 					console.error(`[search_drive] error:`, err);
 					return this.handleDriveError(err);
@@ -76,24 +77,25 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 			async ({ folder_id }) => {
 				const folderId = folder_id || "root";
 				console.log(`[list_folder] folder_id="${folderId}"`);
-				const drive = this.getDriveClient();
 				try {
-					const files = await drive.listFolder(folderId);
-					console.log(`[list_folder] found ${files.length} item(s) in folder "${folderId}"`);
-					if (files.length === 0) {
-						return { content: [{ type: "text", text: "Folder is empty." }] };
-					}
-					const result = files.map((f) => ({
-						id: f.id,
-						name: f.name,
-						type: f.mimeType,
-						modified: f.modifiedTime,
-						size: f.size,
-						isFolder: f.mimeType === GOOGLE_MIME.FOLDER,
-					}));
-					return {
-						content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					};
+					return await this.withTokenRefresh(async (drive) => {
+						const files = await drive.listFolder(folderId);
+						console.log(`[list_folder] found ${files.length} item(s) in folder "${folderId}"`);
+						if (files.length === 0) {
+							return { content: [{ type: "text", text: "Folder is empty." }] };
+						}
+						const result = files.map((f) => ({
+							id: f.id,
+							name: f.name,
+							type: f.mimeType,
+							modified: f.modifiedTime,
+							size: f.size,
+							isFolder: f.mimeType === GOOGLE_MIME.FOLDER,
+						}));
+						return {
+							content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+						};
+					});
 				} catch (err) {
 					console.error(`[list_folder] error:`, err);
 					return this.handleDriveError(err);
@@ -116,101 +118,102 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 					};
 				}
 				console.log(`[download_file] file_id="${file_id ?? ""}" file_name="${file_name ?? ""}"`);
-				const drive = this.getDriveClient();
 				try {
-					let file;
-					if (file_id) {
-						file = await drive.getFileMetadata(file_id);
-					} else {
-						const matches = await drive.findByName(file_name!);
-						console.log(`[download_file] name lookup "${file_name}" → ${matches.length} match(es)`);
-						if (matches.length === 0) {
-							return {
-								content: [{ type: "text", text: `No file found with name "${file_name}".` }],
-								isError: true,
-							};
+					return await this.withTokenRefresh(async (drive) => {
+						let file;
+						if (file_id) {
+							file = await drive.getFileMetadata(file_id);
+						} else {
+							const matches = await drive.findByName(file_name!);
+							console.log(`[download_file] name lookup "${file_name}" → ${matches.length} match(es)`);
+							if (matches.length === 0) {
+								return {
+									content: [{ type: "text", text: `No file found with name "${file_name}".` }],
+									isError: true,
+								};
+							}
+							if (matches.length > 1) {
+								const list = matches.map((f) => `  - "${f.name}" (id: ${f.id}, type: ${f.mimeType}, modified: ${f.modifiedTime})`).join("\n");
+								return {
+									content: [{
+										type: "text",
+										text: `Multiple files found with name "${file_name}". Use file_id to specify which one:\n${list}`,
+									}],
+								};
+							}
+							file = matches[0];
 						}
-						if (matches.length > 1) {
-							const list = matches.map((f) => `  - "${f.name}" (id: ${f.id}, type: ${f.mimeType}, modified: ${f.modifiedTime})`).join("\n");
+						const mimeType = file.mimeType;
+						console.log(`[download_file] "${file.name}" mimeType=${mimeType} size=${file.size ?? "unknown"}`);
+
+						// Google Workspace → not supported, use built-in integration
+						if (GOOGLE_WORKSPACE_MIMES.has(mimeType)) {
+							console.log(`[download_file] Google Workspace file, rejecting: ${mimeType}`);
 							return {
 								content: [{
 									type: "text",
-									text: `Multiple files found with name "${file_name}". Use file_id to specify which one:\n${list}`,
+									text: `Google Workspace files (${mimeType}) are not supported by this tool. Use the built-in Google Drive integration for Google Docs, Sheets, and Slides.`,
+								}],
+								isError: true,
+							};
+						}
+
+						// Text files (plain, CSV, HTML, XML) → return as text content
+						if (isTextMime(mimeType)) {
+							console.log(`[download_file] downloading text file`);
+							const buffer = await drive.downloadFile(file.id);
+							const text = new TextDecoder().decode(buffer);
+							console.log(`[download_file] text decoded (${text.length} chars)`);
+							return {
+								content: [{ type: "text", text }],
+							};
+						}
+
+						// Images → return as native MCP image content
+						if (mimeType.startsWith("image/")) {
+							console.log(`[download_file] downloading image`);
+							const buffer = await drive.downloadFile(file.id);
+							console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
+							const base64 = arrayBufferToBase64(buffer);
+							console.log(`[download_file] base64 ready (${base64.length} chars)`);
+							return {
+								content: [{
+									type: "image",
+									data: base64,
+									mimeType,
 								}],
 							};
 						}
-						file = matches[0];
-					}
-					const mimeType = file.mimeType;
-					console.log(`[download_file] "${file.name}" mimeType=${mimeType} size=${file.size ?? "unknown"}`);
 
-					// Google Workspace → not supported, use built-in integration
-					if (GOOGLE_WORKSPACE_MIMES.has(mimeType)) {
-						console.log(`[download_file] Google Workspace file, rejecting: ${mimeType}`);
+						// PDF, Office, ODS, ODT → resource blob
+						if (BINARY_MIMES.has(mimeType)) {
+							console.log(`[download_file] downloading binary file`);
+							const buffer = await drive.downloadFile(file.id);
+							console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
+							const base64 = arrayBufferToBase64(buffer);
+							console.log(`[download_file] base64 ready (${base64.length} chars)`);
+							return {
+								content: [{
+									type: "resource",
+									resource: {
+										uri: `drive:///${file.id}/${file.name}`,
+										blob: base64,
+										mimeType,
+									},
+								}],
+							};
+						}
+
+						// Unsupported type
+						console.warn(`[download_file] unsupported file type: ${mimeType}`);
 						return {
 							content: [{
 								type: "text",
-								text: `Google Workspace files (${mimeType}) are not supported by this tool. Use the built-in Google Drive integration for Google Docs, Sheets, and Slides.`,
+								text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.`,
 							}],
 							isError: true,
 						};
-					}
-
-					// Text files (plain, CSV, HTML, XML) → return as text content
-					if (isTextMime(mimeType)) {
-						console.log(`[download_file] downloading text file`);
-						const buffer = await drive.downloadFile(file.id);
-						const text = new TextDecoder().decode(buffer);
-						console.log(`[download_file] text decoded (${text.length} chars)`);
-						return {
-							content: [{ type: "text", text }],
-						};
-					}
-
-					// Images → return as native MCP image content
-					if (mimeType.startsWith("image/")) {
-						console.log(`[download_file] downloading image`);
-						const buffer = await drive.downloadFile(file.id);
-						console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
-						const base64 = arrayBufferToBase64(buffer);
-						console.log(`[download_file] base64 ready (${base64.length} chars)`);
-						return {
-							content: [{
-								type: "image",
-								data: base64,
-								mimeType,
-							}],
-						};
-					}
-
-					// PDF, Office, ODS, ODT → resource blob
-					if (BINARY_MIMES.has(mimeType)) {
-						console.log(`[download_file] downloading binary file`);
-						const buffer = await drive.downloadFile(file.id);
-						console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
-						const base64 = arrayBufferToBase64(buffer);
-						console.log(`[download_file] base64 ready (${base64.length} chars)`);
-						return {
-							content: [{
-								type: "resource",
-								resource: {
-									uri: `drive:///${file.id}/${file.name}`,
-									blob: base64,
-									mimeType,
-								},
-							}],
-						};
-					}
-
-					// Unsupported type
-					console.warn(`[download_file] unsupported file type: ${mimeType}`);
-					return {
-						content: [{
-							type: "text",
-							text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.`,
-						}],
-						isError: true,
-					};
+					});
 				} catch (err) {
 					console.error(`[download_file] error:`, err);
 					return this.handleDriveError(err);
@@ -224,6 +227,34 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 			throw new Error("Not authenticated. Please sign in with Google first.");
 		}
 		return createDriveClient(this.props.accessToken);
+	}
+
+	private async withTokenRefresh<T>(operation: (drive: ReturnType<typeof createDriveClient>) => Promise<T>): Promise<T> {
+		const drive = this.getDriveClient();
+		try {
+			return await operation(drive);
+		} catch (err) {
+			if (!(err instanceof TokenExpiredError)) throw err;
+
+			if (!this.props.refreshToken) {
+				console.warn("[withTokenRefresh] No refresh token available, cannot refresh");
+				throw err;
+			}
+
+			console.log("[withTokenRefresh] Access token expired, attempting refresh...");
+			const newAccessToken = await refreshAccessToken({
+				client_id: this.env.GOOGLE_CLIENT_ID,
+				client_secret: this.env.GOOGLE_CLIENT_SECRET,
+				refresh_token: this.props.refreshToken,
+			});
+
+			this.props.accessToken = newAccessToken;
+			await this.ctx.storage.put("props", this.props);
+			console.log("[withTokenRefresh] Token refreshed and persisted");
+
+			const newDrive = createDriveClient(newAccessToken);
+			return await operation(newDrive);
+		}
 	}
 
 	private handleDriveError(err: unknown) {
