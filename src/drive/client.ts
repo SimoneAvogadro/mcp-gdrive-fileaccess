@@ -64,6 +64,20 @@ export function createDriveClient(accessToken: string) {
 		},
 
 		/**
+		 * Find files by exact name. Returns all non-trashed matches.
+		 */
+		async findByName(name: string): Promise<DriveFile[]> {
+			const params = new URLSearchParams({
+				q: `name = '${name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}' and trashed = false`,
+				fields: `files(${FIELDS})`,
+				pageSize: "10",
+			});
+			const resp = await driveRequest(`${DRIVE_API}/files?${params}`);
+			const data = (await resp.json()) as DriveFileList;
+			return data.files || [];
+		},
+
+		/**
 		 * Get file metadata.
 		 */
 		async getFileMetadata(fileId: string): Promise<DriveFile> {
