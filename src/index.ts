@@ -16,6 +16,9 @@ const BINARY_MIMES: Set<string> = new Set([
 
 const GOOGLE_WORKSPACE_MIMES: Set<string> = new Set(Object.values(GOOGLE_MIME));
 
+/** When true, return Office/PDF/OD* files as application/octet-stream instead of their real MIME type. */
+const USE_GENERIC_BINARY_MIME = true;
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
 	const CHUNK = 0x2000; // 8 KB — safe for String.fromCharCode.apply
@@ -192,13 +195,14 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 							console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
 							const base64 = arrayBufferToBase64(buffer);
 							console.log(`[download_file] base64 ready (${base64.length} chars)`);
+							const effectiveMime = USE_GENERIC_BINARY_MIME ? "application/octet-stream" : mimeType;
 							return {
 								content: [{
 									type: "resource",
 									resource: {
 										uri: `drive:///${file.id}/${file.name}`,
 										blob: base64,
-										mimeType,
+										mimeType: effectiveMime,
 									},
 								}],
 							};
