@@ -77,40 +77,6 @@ export async function fetchUpstreamAuthToken({
 	return [{ access_token: body.access_token, refresh_token: body.refresh_token }, null];
 }
 
-/**
- * Refreshes an expired Google access token using a refresh token.
- */
-export async function refreshAccessToken({
-	client_id,
-	client_secret,
-	refresh_token,
-}: {
-	client_id: string;
-	client_secret: string;
-	refresh_token: string;
-}): Promise<string | null> {
-	const resp = await fetch("https://oauth2.googleapis.com/token", {
-		body: new URLSearchParams({
-			client_id,
-			client_secret,
-			refresh_token,
-			grant_type: "refresh_token",
-		}).toString(),
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded",
-		},
-		method: "POST",
-	});
-
-	if (!resp.ok) {
-		console.error("Token refresh failed:", await resp.text());
-		return null;
-	}
-
-	const body = (await resp.json()) as { access_token?: string };
-	return body.access_token ?? null;
-}
-
 export type Props = {
 	email: string;
 	name: string;

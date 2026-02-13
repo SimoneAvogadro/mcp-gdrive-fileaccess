@@ -49,7 +49,7 @@ Security: CSRF tokens via HttpOnly cookies, session binding between auth steps, 
 
 ### Google Drive Client (`src/drive/client.ts`)
 
-`createDriveClient(accessToken)` returns methods: `searchFiles`, `listFolder`, `getFileMetadata`, `downloadFile`, `exportFile`, `exportFileAsText`. Throws `TokenExpiredError` on 401.
+`createDriveClient(accessToken)` returns methods: `searchFiles`, `listFolder`, `getFileMetadata`, `downloadFile`, `exportFile`. Throws `TokenExpiredError` on 401.
 
 ### Type Definitions (`src/drive/types.ts`)
 

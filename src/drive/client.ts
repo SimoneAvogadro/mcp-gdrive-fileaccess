@@ -89,15 +89,7 @@ export function createDriveClient(accessToken: string) {
 			return resp.arrayBuffer();
 		},
 
-		/**
-		 * Export a Google Workspace file to a specific MIME type (text).
-		 */
-		async exportFileAsText(fileId: string, mimeType: string): Promise<string> {
-			const params = new URLSearchParams({ mimeType });
-			const resp = await driveRequest(`${DRIVE_API}/files/${fileId}/export?${params}`);
-			return resp.text();
-		},
-	};
+};
 }
 
 export type DriveClient = ReturnType<typeof createDriveClient>;
