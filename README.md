@@ -101,6 +101,28 @@ Cloudflare Worker
 
 > **Note:** This server only requests the `drive.readonly` OAuth scope. It can search, list, and download files but **cannot** create, modify, or delete anything in your Google Drive. When setting up the OAuth consent screen you can limit the requested scopes to `https://www.googleapis.com/auth/drive.readonly`.
 
+## Adding to Claude.ai
+
+Once deployed, connect the MCP server to your Claude.ai account:
+
+1. Open [claude.ai](https://claude.ai) and sign in
+2. Click your profile icon (bottom-left) → **Settings** → **Integrations**
+3. Click **Add more** → **Add custom integration**
+4. Fill in the fields:
+   - **Name**: any label you like (e.g. `Google Drive`)
+   - **URL**: `https://your-worker.workers.dev/mcp`
+5. Leave the **Advanced** section (OAuth client ID/secret) empty — the server supports dynamic client registration
+6. Click **Connect** — you will be redirected to Google to authorize read-only access to your Drive
+7. Once authorized, the integration is ready. In any chat you can ask Claude to search, browse, or download files from your Google Drive.
+
+### Troubleshooting
+
+- **"McpEndpointNotFound"** after successful Google auth — make sure the URL ends with `/mcp`, not `/sse`
+- **View live logs** from the deployed worker:
+  ```bash
+  npx wrangler tail
+  ```
+
 ## License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
