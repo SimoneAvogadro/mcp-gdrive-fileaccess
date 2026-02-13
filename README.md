@@ -47,6 +47,8 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
    GOOGLE_CLIENT_SECRET=your-google-client-secret
    ```
 
+   > **Note:** `.dev.vars` contains secrets and is listed in `.gitignore`. Never commit it to version control.
+
 3. **Create the KV namespace** and update `wrangler.toml` with the real ID:
 
    ```bash
