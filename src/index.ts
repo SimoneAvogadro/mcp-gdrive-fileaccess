@@ -4,15 +4,17 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError } from "./drive/client";
-import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, GOOGLE_EXPORT_MAP, isGoogleWorkspace } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME } from "./drive/types";
 import type { Props } from "./utils";
 
-const SUPPORTED_BINARY_MIMES: Set<string> = new Set([
+const BINARY_MIMES: Set<string> = new Set([
 	...Object.values(OFFICE_MIME),
 	OTHER_MIME.PDF,
 	OTHER_MIME.ODS,
 	OTHER_MIME.ODT,
 ]);
+
+const GOOGLE_WORKSPACE_MIMES: Set<string> = new Set(Object.values(GOOGLE_MIME));
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
@@ -26,10 +28,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 function isTextMime(mimeType: string): boolean {
 	return mimeType.startsWith("text/");
-}
-
-function isSupportedDirectDownload(mimeType: string): boolean {
-	return SUPPORTED_BINARY_MIMES.has(mimeType) || isTextMime(mimeType) || mimeType.startsWith("image/");
 }
 
 export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Props> {
@@ -105,13 +103,12 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"download_file",
-			"Download a file from Google Drive. Google Docs and Slides are exported as PDF by default because MCP resource blobs with Office MIME types (DOCX/PPTX) are not currently supported by most clients. Google Sheets are exported as XLSX. Set force_office_content_type=true to get the original Office format instead. Also supports direct download of PDF files, images, and text files (TXT, CSV, HTML, XML). Use this tool whenever you need to read or analyze a file from Google Drive. You can pass either the file ID or the exact file name.",
+			"Download a file from Google Drive in its native format. Supports Office documents (DOC/DOCX, XLS/XLSX, PPT/PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. Use this tool whenever you need to read or analyze a file from Google Drive. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
-				force_office_content_type: z.boolean().optional().default(false).describe("If true, export Google Docs as DOCX and Slides as PPTX instead of PDF. Default is false (PDF). Note: most MCP clients cannot handle Office MIME types."),
 			},
-			async ({ file_id, file_name, force_office_content_type }) => {
+			async ({ file_id, file_name }) => {
 				if (!file_id && !file_name) {
 					return {
 						content: [{ type: "text", text: "Either file_id or file_name must be provided." }],
@@ -147,36 +144,15 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 					const mimeType = file.mimeType;
 					console.log(`[download_file] "${file.name}" mimeType=${mimeType} size=${file.size ?? "unknown"}`);
 
-					// Google Workspace → export (PDF by default for Docs/Slides, Office if forced)
-					if (isGoogleWorkspace(mimeType)) {
-						const officeExport = GOOGLE_EXPORT_MAP[mimeType];
-						if (!officeExport) {
-							console.warn(`[download_file] unsupported Google Workspace type: ${mimeType}`);
-							return {
-								content: [{ type: "text", text: `Unsupported Google Workspace type: ${mimeType}` }],
-								isError: true,
-							};
-						}
-						const usePdf = !force_office_content_type
-							&& (mimeType === GOOGLE_MIME.DOC || mimeType === GOOGLE_MIME.SLIDES);
-						const exportInfo = usePdf
-							? { mimeType: "application/pdf", extension: ".pdf" }
-							: officeExport;
-						console.log(`[download_file] exporting as ${exportInfo.mimeType} (${exportInfo.extension})${usePdf ? " [PDF default]" : force_office_content_type ? " [forced Office]" : ""}`);
-						const buffer = await drive.exportFile(file.id, exportInfo.mimeType);
-						console.log(`[download_file] exported ${buffer.byteLength} bytes, converting to base64`);
-						const base64 = arrayBufferToBase64(buffer);
-						console.log(`[download_file] base64 ready (${base64.length} chars)`);
-						const fileName = file.name.replace(/\.[^.]*$/, "") + exportInfo.extension;
+					// Google Workspace → not supported, use built-in integration
+					if (GOOGLE_WORKSPACE_MIMES.has(mimeType)) {
+						console.log(`[download_file] Google Workspace file, rejecting: ${mimeType}`);
 						return {
 							content: [{
-								type: "resource",
-								resource: {
-									uri: `drive:///${file.id}/${fileName}`,
-									blob: base64,
-									mimeType: exportInfo.mimeType,
-								},
+								type: "text",
+								text: `Google Workspace files (${mimeType}) are not supported by this tool. Use the built-in Google Drive integration for Google Docs, Sheets, and Slides.`,
 							}],
+							isError: true,
 						};
 					}
 
@@ -191,8 +167,24 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 						};
 					}
 
-					// Office, PDF, ODS, ODT, images → direct download as blob
-					if (isSupportedDirectDownload(mimeType)) {
+					// Images → return as native MCP image content
+					if (mimeType.startsWith("image/")) {
+						console.log(`[download_file] downloading image`);
+						const buffer = await drive.downloadFile(file.id);
+						console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
+						const base64 = arrayBufferToBase64(buffer);
+						console.log(`[download_file] base64 ready (${base64.length} chars)`);
+						return {
+							content: [{
+								type: "image",
+								data: base64,
+								mimeType,
+							}],
+						};
+					}
+
+					// PDF, Office, ODS, ODT → resource blob
+					if (BINARY_MIMES.has(mimeType)) {
 						console.log(`[download_file] downloading binary file`);
 						const buffer = await drive.downloadFile(file.id);
 						console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
@@ -215,7 +207,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 					return {
 						content: [{
 							type: "text",
-							text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), Google Docs/Sheets/Slides, PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.`,
+							text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.`,
 						}],
 						isError: true,
 					};

@@ -42,12 +42,3 @@ export const OTHER_MIME = {
 	ODT: "application/vnd.oasis.opendocument.text",
 } as const;
 
-export const GOOGLE_EXPORT_MAP: Record<string, { mimeType: string; extension: string }> = {
-	[GOOGLE_MIME.DOC]: { mimeType: OFFICE_MIME.DOCX, extension: ".docx" },
-	[GOOGLE_MIME.SHEET]: { mimeType: OFFICE_MIME.XLSX, extension: ".xlsx" },
-	[GOOGLE_MIME.SLIDES]: { mimeType: OFFICE_MIME.PPTX, extension: ".pptx" },
-};
-
-export function isGoogleWorkspace(mimeType: string): boolean {
-	return Object.values(GOOGLE_MIME).includes(mimeType as any);
-}
