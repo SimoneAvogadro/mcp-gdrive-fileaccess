@@ -4,6 +4,5 @@ interface CloudflareEnv {
 	OAUTH_KV: KVNamespace;
 	GOOGLE_CLIENT_ID: string;
 	GOOGLE_CLIENT_SECRET: string;
-	COOKIE_ENCRYPTION_KEY: string;
 	MCP_OBJECT: DurableObjectNamespace<import("./src/index").OfficeMCP>;
 }

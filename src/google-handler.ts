@@ -6,6 +6,7 @@ import {
 	bindStateToSession,
 	createOAuthState,
 	generateCSRFProtection,
+	getOrCreateCookieSigningKey,
 	isClientApproved,
 	OAuthError,
 	renderApprovalDialog,
@@ -28,7 +29,7 @@ app.get("/authorize", async (c) => {
 	}
 
 	// Check if client is already approved
-	if (await isClientApproved(c.req.raw, clientId, c.env.COOKIE_ENCRYPTION_KEY)) {
+	if (await isClientApproved(c.req.raw, clientId, await getOrCreateCookieSigningKey(c.env.OAUTH_KV))) {
 		const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_KV);
 		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
 		return redirectToGoogle(c.req.raw, c.env.GOOGLE_CLIENT_ID, stateToken, { "Set-Cookie": sessionBindingCookie });
@@ -77,7 +78,7 @@ app.post("/authorize", async (c) => {
 		const approvedClientCookie = await addApprovedClient(
 			c.req.raw,
 			state.oauthReqInfo.clientId,
-			c.env.COOKIE_ENCRYPTION_KEY,
+			await getOrCreateCookieSigningKey(c.env.OAUTH_KV),
 		);
 
 		// Create OAuth state and bind it to this user's session

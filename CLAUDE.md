@@ -18,7 +18,6 @@ No test framework is configured.
 
 Copy `.dev.vars` and fill in:
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth credentials
-- `COOKIE_ENCRYPTION_KEY` — Generate with `openssl rand -hex 32`
 
 ## Architecture
 

@@ -322,3 +322,18 @@ async function importKey(secret: string): Promise<CryptoKey> {
 		["sign", "verify"],
 	);
 }
+
+// --- Cookie Signing Key (auto-generated, persisted in KV) ---
+
+export async function getOrCreateCookieSigningKey(kv: KVNamespace): Promise<string> {
+	const KEY = "cookie_signing_key";
+	const existing = await kv.get(KEY);
+	if (existing) return existing;
+
+	const key = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+
+	await kv.put(KEY, key);
+	return key;
+}

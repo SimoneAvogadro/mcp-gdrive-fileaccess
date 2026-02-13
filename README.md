@@ -6,6 +6,7 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
 
 ## Features
 
+- **Read-only by design** — requests only the `drive.readonly` scope, so your files are never modified
 - **Search** files across your entire Google Drive
 - **Browse** folder contents
 - **Download** files preserving their native format:
@@ -44,7 +45,6 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
    ```
    GOOGLE_CLIENT_ID=your-google-client-id
    GOOGLE_CLIENT_SECRET=your-google-client-secret
-   COOKIE_ENCRYPTION_KEY=<run: openssl rand -hex 32>
    ```
 
 3. **Create the KV namespace** and update `wrangler.toml` with the real ID:
@@ -70,7 +70,6 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
    ```bash
    npx wrangler secret put GOOGLE_CLIENT_ID
    npx wrangler secret put GOOGLE_CLIENT_SECRET
-   npx wrangler secret put COOKIE_ENCRYPTION_KEY
    ```
 
 ## Architecture
@@ -93,10 +92,12 @@ Cloudflare Worker
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project (or select an existing one)
-3. Enable the **Google Drive API**
+3. Enable the **Google Drive API** (here: https://console.cloud.google.com/apis/api/drive.googleapis.com)
 4. Under **APIs & Services > Credentials**, create an **OAuth 2.0 Client ID** (Web application)
 5. Add your worker URL + `/callback` as an authorized redirect URI (e.g. `https://your-worker.workers.dev/callback`)
 6. Copy the Client ID and Client Secret into your `.dev.vars` / worker secrets
+
+> **Note:** This server only requests the `drive.readonly` OAuth scope. It can search, list, and download files but **cannot** create, modify, or delete anything in your Google Drive. When setting up the OAuth consent screen you can limit the requested scopes to `https://www.googleapis.com/auth/drive.readonly`.
 
 ## License
 
