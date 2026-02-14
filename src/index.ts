@@ -16,9 +16,6 @@ const BINARY_MIMES: Set<string> = new Set([
 
 const GOOGLE_WORKSPACE_MIMES: Set<string> = new Set(Object.values(GOOGLE_MIME));
 
-/** When true, return Office/PDF/OD* files as application/octet-stream instead of their real MIME type. */
-const USE_GENERIC_BINARY_MIME = true;
-
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
 	const bytes = new Uint8Array(buffer);
 	const CHUNK = 0x2000; // 8 KB — safe for String.fromCharCode.apply
@@ -38,6 +35,16 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 		name: "MCP GDrive FileAccess",
 		version: "1.0.0",
 	});
+
+	/** Base URL captured from the first incoming request (e.g. "https://my-worker.example.com") */
+	private baseUrl = "";
+
+	async fetch(request: Request): Promise<Response> {
+		if (!this.baseUrl) {
+			this.baseUrl = new URL(request.url).origin;
+		}
+		return super.fetch(request);
+	}
 
 	async init() {
 		this.server.tool(
@@ -108,7 +115,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"download_file",
-			"Download a file from Google Drive in its native format. Supports Office documents (DOC/DOCX, XLS/XLSX, PPT/PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. Use this tool whenever you need to read or analyze a file from Google Drive. You can pass either the file ID or the exact file name.",
+			"Download a file from Google Drive in its native format. Supports Office documents (DOC/DOCX, XLS/XLSX, PPT/PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. Binary files larger than 25 MB are not supported. Use this tool whenever you need to read or analyze a file from Google Drive. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -188,22 +195,22 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 							};
 						}
 
-						// PDF, Office, ODS, ODT → resource blob
+						// PDF, Office, ODS, ODT → temporary blob URL
 						if (BINARY_MIMES.has(mimeType)) {
 							console.log(`[download_file] downloading binary file`);
 							const buffer = await drive.downloadFile(file.id);
-							console.log(`[download_file] downloaded ${buffer.byteLength} bytes, converting to base64`);
-							const base64 = arrayBufferToBase64(buffer);
-							console.log(`[download_file] base64 ready (${base64.length} chars)`);
-							const effectiveMime = USE_GENERIC_BINARY_MIME ? "application/octet-stream" : mimeType;
+							console.log(`[download_file] downloaded ${buffer.byteLength} bytes, storing in KV`);
+							const blobId = crypto.randomUUID();
+							await this.env.OAUTH_KV.put(`blob:${blobId}`, buffer, {
+								expirationTtl: 300,
+								metadata: { mimeType, fileName: file.name },
+							});
+							const downloadUrl = `${this.baseUrl}/blob/${blobId}`;
+							console.log(`[download_file] blob stored, URL: ${downloadUrl}`);
 							return {
 								content: [{
-									type: "resource",
-									resource: {
-										uri: `drive:///${file.id}/${file.name}`,
-										blob: base64,
-										mimeType: effectiveMime,
-									},
+									type: "text",
+									text: `File ready for download:\n${downloadUrl}\n\nFile: ${file.name}\nType: ${mimeType}\nSize: ${buffer.byteLength} bytes\n\nNote: this link expires in 5 minutes and can only be used once.`,
 								}],
 							};
 						}

@@ -189,4 +189,26 @@ app.get("/callback", async (c) => {
 	return new Response(null, { status: 302, headers });
 });
 
+app.get("/blob/:id", async (c) => {
+	const blobId = c.req.param("id");
+	const { value, metadata } = await c.env.OAUTH_KV.getWithMetadata<{ mimeType: string; fileName: string }>(
+		`blob:${blobId}`,
+		"arrayBuffer",
+	);
+
+	if (!value || !metadata) {
+		return c.text("Not found", 404);
+	}
+
+	// Delete after first download
+	await c.env.OAUTH_KV.delete(`blob:${blobId}`);
+
+	return new Response(value as ArrayBuffer, {
+		headers: {
+			"Content-Type": metadata.mimeType,
+			"Content-Disposition": `attachment; filename="${metadata.fileName}"`,
+		},
+	});
+});
+
 export { app as GoogleHandler };
