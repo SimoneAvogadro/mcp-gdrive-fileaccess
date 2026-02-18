@@ -47,3 +47,10 @@ export const SPREADSHEET_MIMES: Set<string> = new Set([
 	OFFICE_MIME.XLSX,
 ]);
 
+// MIME types that can be converted to plain text by download_simplified_text_version
+export const TEXT_EXTRACTABLE_MIMES: Set<string> = new Set([
+	OFFICE_MIME.XLSX,
+	OFFICE_MIME.DOCX,
+	OFFICE_MIME.PPTX,
+]);
+

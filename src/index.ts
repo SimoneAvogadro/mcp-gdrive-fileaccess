@@ -4,8 +4,10 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError } from "./drive/client";
-import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, SPREADSHEET_MIMES } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES } from "./drive/types";
 import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
+import { parseDocxToText } from "./parsers/docx";
+import { parsePptxToText } from "./parsers/pptx";
 import { refreshAccessToken, type Props } from "./utils";
 
 const BINARY_MIMES: Set<string> = new Set([
@@ -235,7 +237,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"download_simplified_text_version",
-			"Download a spreadsheet file from Google Drive and return its contents as CSV text, one per sheet. Only supports native spreadsheet formats (XLSX). Google Workspace files (Google Sheets) are not supported — use the built-in Google Drive integration for those. Use this tool when you need to read and analyze spreadsheet data as text. You can pass either the file ID or the exact file name.",
+			"Download a DOCX, PPTX, or XLSX file from Google Drive and return its contents as plain text. DOCX returns extracted paragraphs, PPTX returns text per slide, XLSX returns CSV per sheet. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. Use this tool when you need to read and analyze document content as text. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -287,12 +289,12 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 							};
 						}
 
-						// Only native spreadsheet formats
-						if (!SPREADSHEET_MIMES.has(mimeType)) {
+						// Only supported formats
+						if (!TEXT_EXTRACTABLE_MIMES.has(mimeType)) {
 							return {
 								content: [{
 									type: "text",
-									text: `This tool only supports spreadsheet files (XLSX). The file "${file.name}" has type ${mimeType}. Use download_file instead.`,
+									text: `This tool only supports DOCX, PPTX, and XLSX files. The file "${file.name}" has type ${mimeType}. Use download_file instead.`,
 								}],
 								isError: true,
 							};
@@ -302,12 +304,70 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 						const buffer = await drive.downloadFile(file.id);
 						console.log(`[download_simplified_text_version] downloaded ${buffer.byteLength} bytes, parsing`);
 
+						// DOCX → plain text paragraphs
+						if (mimeType === OFFICE_MIME.DOCX) {
+							try {
+								const text = parseDocxToText(buffer);
+								if (text.trim().length === 0) {
+									return {
+										content: [{ type: "text", text: `The document "${file.name}" contains no text.` }],
+									};
+								}
+								console.log(`[download_simplified_text_version] DOCX parsed (${text.length} chars)`);
+								return {
+									content: [{ type: "text", text }],
+								};
+							} catch (parseErr) {
+								const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+								console.error(`[download_simplified_text_version] DOCX parse error:`, parseErr);
+								return {
+									content: [{
+										type: "text",
+										text: `Failed to parse DOCX "${file.name}": ${msg}`,
+									}],
+									isError: true,
+								};
+							}
+						}
+
+						// PPTX → text per slide
+						if (mimeType === OFFICE_MIME.PPTX) {
+							try {
+								const slides = parsePptxToText(buffer);
+								if (slides.length === 0) {
+									return {
+										content: [{ type: "text", text: `The presentation "${file.name}" contains no text.` }],
+									};
+								}
+								console.log(`[download_simplified_text_version] PPTX parsed (${slides.length} slide(s))`);
+								const content: { type: "text"; text: string }[] = [];
+								for (const slide of slides) {
+									content.push({
+										type: "text",
+										text: `--- Slide ${slide.slideNumber} ---\n${slide.text}`,
+									});
+								}
+								return { content };
+							} catch (parseErr) {
+								const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+								console.error(`[download_simplified_text_version] PPTX parse error:`, parseErr);
+								return {
+									content: [{
+										type: "text",
+										text: `Failed to parse PPTX "${file.name}": ${msg}`,
+									}],
+									isError: true,
+								};
+							}
+						}
+
+						// XLSX → CSV per sheet (existing logic)
 						let sheets;
 						try {
 							sheets = parseSpreadsheetToCSV(buffer);
 						} catch (parseErr) {
 							const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-							console.error(`[download_simplified_text_version] parse error:`, parseErr);
+							console.error(`[download_simplified_text_version] XLSX parse error:`, parseErr);
 							return {
 								content: [{
 									type: "text",
@@ -323,7 +383,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 							};
 						}
 
-						console.log(`[download_simplified_text_version] parsed ${sheets.length} sheet(s)`);
+						console.log(`[download_simplified_text_version] XLSX parsed ${sheets.length} sheet(s)`);
 
 						if (sheets.length === 1) {
 							return {

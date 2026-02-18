@@ -14,7 +14,7 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
   - PDF, ODT, ODS
   - Plain text (TXT, CSV, HTML, XML)
   - Images (PNG, JPG, GIF, etc.)
-- **Read spreadsheet data as text** — extracts XLSX contents as CSV, one per sheet, so Claude can analyze them directly
+- **Read document content as text** — extracts plain text from DOCX (paragraphs), PPTX (text per slide), and XLSX (CSV per sheet), so Claude can analyze them directly
 
 > **Note:** Google Workspace files (Google Docs, Sheets, Slides) are not handled by this server — use the official Claude Google Drive integration for those.
 
@@ -25,7 +25,7 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
 | `search_drive(query)` | Full-text search across Google Drive |
 | `list_folder(folder_id?)` | List files in a folder (root by default) |
 | `download_file(file_id, file_name)` | Download a file in its native format |
-| `download_simplified_text_version(file_id, file_name)` | Download a spreadsheet (XLSX) and return its contents as CSV text |
+| `download_simplified_text_version(file_id, file_name)` | Download a DOCX, PPTX, or XLSX file and return its contents as plain text |
 
 ## Prerequisites
 
