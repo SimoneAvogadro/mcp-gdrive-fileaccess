@@ -189,6 +189,29 @@ app.get("/callback", async (c) => {
 	return new Response(null, { status: 302, headers });
 });
 
+// Favicon — helps Claude.ai (and browsers) show an icon for this MCP server
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#1a73e8"/>
+  <path d="M40 38h30l22 22v36a6 6 0 0 1-6 6H46a6 6 0 0 1-6-6V38z" fill="#fff"/>
+  <path d="M70 38l22 22H76a6 6 0 0 1-6-6V38z" fill="#a0c4ff"/>
+  <rect x="50" y="70" width="28" height="4" rx="2" fill="#1a73e8"/>
+  <rect x="50" y="80" width="20" height="4" rx="2" fill="#1a73e8"/>
+</svg>`;
+
+app.get("/favicon.ico", (c) => {
+	return c.body(FAVICON_SVG, 200, {
+		"Content-Type": "image/svg+xml",
+		"Cache-Control": "public, max-age=604800",
+	});
+});
+
+app.get("/favicon.svg", (c) => {
+	return c.body(FAVICON_SVG, 200, {
+		"Content-Type": "image/svg+xml",
+		"Cache-Control": "public, max-age=604800",
+	});
+});
+
 app.get("/blob/:id", async (c) => {
 	const blobId = c.req.param("id");
 	const { value, metadata } = await c.env.OAUTH_KV.getWithMetadata<{ mimeType: string; fileName: string }>(
