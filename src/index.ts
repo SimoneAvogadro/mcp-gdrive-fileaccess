@@ -237,7 +237,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"download_simplified_text_version",
-			"Download a DOCX, PPTX, or XLSX file from Google Drive and return its contents as plain text. DOCX returns extracted paragraphs, PPTX returns text per slide, XLSX returns CSV per sheet. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. Use this tool when you need to read and analyze document content as text. You can pass either the file ID or the exact file name.",
+			"Download a DOCX, PPTX, or XLSX file from Google Drive and return a simplified text-only version of its contents. All formatting, images, charts, and layout are stripped — only raw text is returned. DOCX returns extracted paragraphs, PPTX returns text per slide, XLSX returns CSV per sheet. Use this for quick text analysis only; if you need full fidelity (formatting, images, layout), use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),

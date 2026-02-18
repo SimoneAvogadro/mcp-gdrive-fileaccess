@@ -14,7 +14,7 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
   - PDF, ODT, ODS
   - Plain text (TXT, CSV, HTML, XML)
   - Images (PNG, JPG, GIF, etc.)
-- **Read document content as text** — extracts plain text from DOCX (paragraphs), PPTX (text per slide), and XLSX (CSV per sheet), so Claude can analyze them directly
+- **Quick text extraction** — returns a simplified text-only version of DOCX, PPTX, and XLSX files (no formatting, images, or layout) for fast text analysis
 
 > **Note:** Google Workspace files (Google Docs, Sheets, Slides) are not handled by this server — use the official Claude Google Drive integration for those.
 
@@ -25,7 +25,7 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
 | `search_drive(query)` | Full-text search across Google Drive |
 | `list_folder(folder_id?)` | List files in a folder (root by default) |
 | `download_file(file_id, file_name)` | Download a file in its native format |
-| `download_simplified_text_version(file_id, file_name)` | Download a DOCX, PPTX, or XLSX file and return its contents as plain text |
+| `download_simplified_text_version(file_id, file_name)` | Simplified text-only extraction from DOCX, PPTX, or XLSX (no formatting/images) |
 
 ## Prerequisites
 

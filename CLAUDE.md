@@ -33,7 +33,7 @@ Runs on Cloudflare Workers with `nodejs_compat`. Uses:
 1. **`search_drive(query)`** — Full-text search in Google Drive
 2. **`list_folder(folder_id?)`** — List files in a folder (root by default)
 3. **`download_file(file_id)`** — Download a file in its native format
-4. **`download_simplified_text_version(file_id)`** — Download a DOCX, PPTX, or XLSX file and return its contents as plain text (paragraphs, slides, or CSV per sheet)
+4. **`download_simplified_text_version(file_id)`** — Download a DOCX, PPTX, or XLSX file and return a simplified text-only version (no formatting, images, or layout). For quick text analysis only
 
 Files are returned as base64 resource blobs with their native MIME type. Plain text is returned as text content. Unsupported file types return an error. Google Workspace files (Google Docs, Sheets, Slides) are NOT handled by this MCP server — they are accessed via the official Claude Google Drive plugin.
 
