@@ -34,10 +34,20 @@ function isTextMime(mimeType: string): boolean {
 }
 
 export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Props> {
-	server = new McpServer({
-		name: "MCP GDrive FileAccess",
-		version: "1.0.0",
-	});
+	server = new McpServer(
+		{
+			name: "MCP GDrive FileAccess",
+			version: "1.0.0",
+		},
+		{
+			instructions: `This server provides access to files stored in Google Drive.
+
+IMPORTANT — choosing the right download tool:
+• For DOCX, XLSX, or PPTX files: PREFER download_simplified_text_version. It returns the file's text content directly in the response, which is faster and more reliable. Only use download_file for these formats if the user explicitly needs the original binary file (e.g., to preserve formatting, images, or layout).
+• For PDFs, images, ODT, ODS, and plain text files: use download_file (download_simplified_text_version does not support these).
+• For Google Docs, Sheets, or Slides: use the built-in Google Drive integration instead (neither tool supports Google Workspace files).`,
+		},
+	);
 
 	/** Base URL captured from the first incoming request (e.g. "https://my-worker.example.com") */
 	private baseUrl = "";
@@ -52,7 +62,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 	async init() {
 		this.server.tool(
 			"search_drive",
-			"Search files on Google Drive by keyword. Returns file IDs, names, types, and modification dates. Use this to find files before downloading them with download_file.",
+			"Search files on Google Drive by keyword. Returns file IDs, names, types, and modification dates. Use this to find files before downloading them.",
 			{ query: z.string().describe("Search query (keywords to find in file names or content)") },
 			async ({ query }) => {
 				console.log(`[search_drive] query="${query}"`);
@@ -83,7 +93,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"list_folder",
-			"List files in a Google Drive folder. If no folder_id is provided, lists the root folder. Returns file IDs, names, types, and modification dates. Use download_file to retrieve a specific file.",
+			"List files in a Google Drive folder. If no folder_id is provided, lists the root folder. Returns file IDs, names, types, and modification dates.",
 			{
 				folder_id: z.string().optional().describe("Google Drive folder ID (omit for root folder)"),
 			},
@@ -118,7 +128,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"download_file",
-			"Download a file from Google Drive in its native format. Supports Office documents (DOC/DOCX, XLS/XLSX, PPT/PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. Binary files larger than 25 MB are not supported. Use this tool whenever you need to read or analyze a file from Google Drive. You can pass either the file ID or the exact file name.",
+			"Download a file from Google Drive in its native binary format. Returns the file as a temporary download URL (for Office/PDF/ODT/ODS) or inline content (for text and images). Supported types: DOC/DOCX, XLS/XLSX, PPT/PPTX, PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Binary files larger than 25 MB are not supported. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. IMPORTANT: For DOCX, XLSX, and PPTX files, prefer download_simplified_text_version instead — it returns the text content directly without requiring URL access. Only use this tool for those formats when the user explicitly needs the original binary file with full formatting, images, or layout. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -237,7 +247,7 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 
 		this.server.tool(
 			"download_simplified_text_version",
-			"Download a DOCX, PPTX, or XLSX file from Google Drive and return a simplified text-only version of its contents. All formatting, images, charts, and layout are stripped — only raw text is returned. DOCX returns extracted paragraphs, PPTX returns text per slide, XLSX returns CSV per sheet. Use this for quick text analysis only; if you need full fidelity (formatting, images, layout), use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
+			"Recommended way to read DOCX, PPTX, and XLSX files from Google Drive. Downloads the file and returns its text content directly in the response — no URL or additional access needed. DOCX returns extracted paragraphs, PPTX returns text organized by slide, XLSX returns CSV data per sheet. All formatting, images, charts, and layout are stripped. If the user needs the original file with full formatting and layout preserved, use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
