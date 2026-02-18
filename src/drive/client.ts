@@ -42,6 +42,9 @@ export function createDriveClient(accessToken: string) {
 				fields: `files(${FIELDS})`,
 				pageSize: String(pageSize),
 				orderBy: "modifiedTime desc",
+				includeItemsFromAllDrives: "true",
+				supportsAllDrives: "true",
+				corpora: "allDrives",
 			});
 			const resp = await driveRequest(`${DRIVE_API}/files?${params}`);
 			const data = (await resp.json()) as DriveFileList;
@@ -57,6 +60,9 @@ export function createDriveClient(accessToken: string) {
 				fields: `files(${FIELDS})`,
 				pageSize: String(pageSize),
 				orderBy: "modifiedTime desc",
+				includeItemsFromAllDrives: "true",
+				supportsAllDrives: "true",
+				corpora: "allDrives",
 			});
 			const resp = await driveRequest(`${DRIVE_API}/files?${params}`);
 			const data = (await resp.json()) as DriveFileList;
@@ -71,6 +77,9 @@ export function createDriveClient(accessToken: string) {
 				q: `name = '${name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}' and trashed = false`,
 				fields: `files(${FIELDS})`,
 				pageSize: "10",
+				includeItemsFromAllDrives: "true",
+				supportsAllDrives: "true",
+				corpora: "allDrives",
 			});
 			const resp = await driveRequest(`${DRIVE_API}/files?${params}`);
 			const data = (await resp.json()) as DriveFileList;
@@ -81,7 +90,7 @@ export function createDriveClient(accessToken: string) {
 		 * Get file metadata.
 		 */
 		async getFileMetadata(fileId: string): Promise<DriveFile> {
-			const params = new URLSearchParams({ fields: FIELDS });
+			const params = new URLSearchParams({ fields: FIELDS, supportsAllDrives: "true" });
 			const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?${params}`);
 			return (await resp.json()) as DriveFile;
 		},
@@ -90,7 +99,7 @@ export function createDriveClient(accessToken: string) {
 		 * Download a binary file (non-Google Workspace).
 		 */
 		async downloadFile(fileId: string): Promise<ArrayBuffer> {
-			const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?alt=media`);
+			const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?alt=media&supportsAllDrives=true`);
 			return resp.arrayBuffer();
 		},
 
@@ -98,7 +107,7 @@ export function createDriveClient(accessToken: string) {
 		 * Export a Google Workspace file to a specific MIME type (binary).
 		 */
 		async exportFile(fileId: string, mimeType: string): Promise<ArrayBuffer> {
-			const params = new URLSearchParams({ mimeType });
+			const params = new URLSearchParams({ mimeType, supportsAllDrives: "true" });
 			const resp = await driveRequest(`${DRIVE_API}/files/${fileId}/export?${params}`);
 			return resp.arrayBuffer();
 		},

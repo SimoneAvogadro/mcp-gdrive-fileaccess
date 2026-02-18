@@ -15,3 +15,6 @@ bindings = [
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["OfficeMCP"]
+
+[observability]
+enabled = true
