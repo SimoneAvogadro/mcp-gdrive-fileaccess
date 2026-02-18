@@ -11,10 +11,12 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
 - **Browse** folder contents
 - **Download** files preserving their native format:
   - Office documents (DOCX, XLSX, PPTX, DOC, XLS, PPT)
-  - Google Workspace files (Docs, Sheets, Slides) &mdash; exported as Office format
   - PDF, ODT, ODS
   - Plain text (TXT, CSV, HTML, XML)
   - Images (PNG, JPG, GIF, etc.)
+- **Read spreadsheet data as text** — extracts XLSX contents as CSV, one per sheet, so Claude can analyze them directly
+
+> **Note:** Google Workspace files (Google Docs, Sheets, Slides) are not handled by this server — use the official Claude Google Drive integration for those.
 
 ## MCP Tools
 
@@ -22,7 +24,8 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
 |------|-------------|
 | `search_drive(query)` | Full-text search across Google Drive |
 | `list_folder(folder_id?)` | List files in a folder (root by default) |
-| `download_file(file_id)` | Download a file in its native format |
+| `download_file(file_id, file_name)` | Download a file in its native format |
+| `download_simplified_text_version(file_id, file_name)` | Download a spreadsheet (XLSX) and return its contents as CSV text |
 
 ## Prerequisites
 
@@ -83,7 +86,8 @@ Cloudflare Worker
 └── OfficeMCP (McpAgent)   /mcp — MCP server (Durable Object w/ SQLite)
     ├── search_drive
     ├── list_folder
-    └── download_file
+    ├── download_file
+    └── download_simplified_text_version
 ```
 
 - **KV (`OAUTH_KV`)** stores OAuth state with a 10-minute TTL

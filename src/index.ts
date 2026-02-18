@@ -4,7 +4,8 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError } from "./drive/client";
-import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, SPREADSHEET_MIMES } from "./drive/types";
+import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
 import { refreshAccessToken, type Props } from "./utils";
 
 const BINARY_MIMES: Set<string> = new Set([
@@ -227,6 +228,123 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 					});
 				} catch (err) {
 					console.error(`[download_file] error:`, err);
+					return this.handleDriveError(err);
+				}
+			},
+		);
+
+		this.server.tool(
+			"download_simplified_text_version",
+			"Download a spreadsheet file from Google Drive and return its contents as CSV text, one per sheet. Only supports native spreadsheet formats (XLSX). Google Workspace files (Google Sheets) are not supported — use the built-in Google Drive integration for those. Use this tool when you need to read and analyze spreadsheet data as text. You can pass either the file ID or the exact file name.",
+			{
+				file_id: z.string().optional().describe("Google Drive file ID to download"),
+				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
+			},
+			async ({ file_id, file_name }) => {
+				if (!file_id && !file_name) {
+					return {
+						content: [{ type: "text", text: "Either file_id or file_name must be provided." }],
+						isError: true,
+					};
+				}
+				console.log(`[download_simplified_text_version] file_id="${file_id ?? ""}" file_name="${file_name ?? ""}"`);
+				try {
+					return await this.withTokenRefresh(async (drive) => {
+						let file;
+						if (file_id) {
+							file = await drive.getFileMetadata(file_id);
+						} else {
+							const matches = await drive.findByName(file_name!);
+							console.log(`[download_simplified_text_version] name lookup "${file_name}" → ${matches.length} match(es)`);
+							if (matches.length === 0) {
+								return {
+									content: [{ type: "text", text: `No file found with name "${file_name}".` }],
+									isError: true,
+								};
+							}
+							if (matches.length > 1) {
+								const list = matches.map((f) => `  - "${f.name}" (id: ${f.id}, type: ${f.mimeType}, modified: ${f.modifiedTime})`).join("\n");
+								return {
+									content: [{
+										type: "text",
+										text: `Multiple files found with name "${file_name}". Use file_id to specify which one:\n${list}`,
+									}],
+								};
+							}
+							file = matches[0];
+						}
+						const mimeType = file.mimeType;
+						console.log(`[download_simplified_text_version] "${file.name}" mimeType=${mimeType}`);
+
+						// Google Workspace → not supported, use built-in integration
+						if (GOOGLE_WORKSPACE_MIMES.has(mimeType)) {
+							return {
+								content: [{
+									type: "text",
+									text: `Google Workspace files (${mimeType}) are not supported by this tool. Use the built-in Google Drive integration for Google Docs, Sheets, and Slides.`,
+								}],
+								isError: true,
+							};
+						}
+
+						// Only native spreadsheet formats
+						if (!SPREADSHEET_MIMES.has(mimeType)) {
+							return {
+								content: [{
+									type: "text",
+									text: `This tool only supports spreadsheet files (XLSX). The file "${file.name}" has type ${mimeType}. Use download_file instead.`,
+								}],
+								isError: true,
+							};
+						}
+
+						console.log(`[download_simplified_text_version] downloading file`);
+						const buffer = await drive.downloadFile(file.id);
+						console.log(`[download_simplified_text_version] downloaded ${buffer.byteLength} bytes, parsing`);
+
+						let sheets;
+						try {
+							sheets = parseSpreadsheetToCSV(buffer);
+						} catch (parseErr) {
+							const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+							console.error(`[download_simplified_text_version] parse error:`, parseErr);
+							return {
+								content: [{
+									type: "text",
+									text: `Failed to parse spreadsheet "${file.name}": ${msg}`,
+								}],
+								isError: true,
+							};
+						}
+
+						if (sheets.length === 0) {
+							return {
+								content: [{ type: "text", text: `The spreadsheet "${file.name}" contains no data.` }],
+							};
+						}
+
+						console.log(`[download_simplified_text_version] parsed ${sheets.length} sheet(s)`);
+
+						if (sheets.length === 1) {
+							return {
+								content: [{ type: "text", text: sheets[0].csv }],
+							};
+						}
+
+						// Multiple sheets: summary + one element per sheet
+						const content: { type: "text"; text: string }[] = [
+							{ type: "text", text: `Spreadsheet "${file.name}" contains ${sheets.length} sheets: ${sheets.map((s) => s.sheetName).join(", ")}` },
+						];
+						for (const sheet of sheets) {
+							content.push({
+								type: "text",
+								text: `--- Sheet: ${sheet.sheetName} ---\n${sheet.csv}`,
+							});
+						}
+						return { content };
+					});
+				} catch (err) {
+					console.error(`[download_simplified_text_version] error:`, err);
 					return this.handleDriveError(err);
 				}
 			},

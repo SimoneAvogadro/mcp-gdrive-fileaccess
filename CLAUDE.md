@@ -29,12 +29,13 @@ Runs on Cloudflare Workers with `nodejs_compat`. Uses:
 
 ### Entry Point (`src/index.ts`)
 
-`OfficeMCP` extends `McpAgent` and registers 3 MCP tools:
+`OfficeMCP` extends `McpAgent` and registers 4 MCP tools:
 1. **`search_drive(query)`** — Full-text search in Google Drive
 2. **`list_folder(folder_id?)`** — List files in a folder (root by default)
 3. **`download_file(file_id)`** — Download a file in its native format
+4. **`download_simplified_text_version(file_id)`** — Download a spreadsheet (XLSX) and return its contents as CSV text, one per sheet
 
-Files are returned as base64 resource blobs with their native MIME type. Google Workspace files are exported to Office format (Docs→DOCX, Sheets→XLSX, Slides→PPTX). Plain text is returned as text content. Unsupported file types return an error.
+Files are returned as base64 resource blobs with their native MIME type. Plain text is returned as text content. Unsupported file types return an error. Google Workspace files (Google Docs, Sheets, Slides) are NOT handled by this MCP server — they are accessed via the official Claude Google Drive plugin.
 
 The default export wires the OAuth provider to serve MCP at `/mcp`.
 

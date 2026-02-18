@@ -13,6 +13,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "agents": "^0.0.95",
     "hono": "^4.7.10",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^3.25.67"
   },
   "devDependencies": {

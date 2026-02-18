@@ -42,3 +42,8 @@ export const OTHER_MIME = {
 	ODT: "application/vnd.oasis.opendocument.text",
 } as const;
 
+// Native spreadsheet MIME types supported by the text parser (XLSX only for now)
+export const SPREADSHEET_MIMES: Set<string> = new Set([
+	OFFICE_MIME.XLSX,
+]);
+
