@@ -38,6 +38,13 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 		{
 			name: "MCP GDrive FileAccess",
 			version: "1.0.0",
+			icons: [
+				{
+					src: `data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#1a73e8"/><path d="M40 38h30l22 22v36a6 6 0 0 1-6 6H46a6 6 0 0 1-6-6V38z" fill="#fff"/><path d="M70 38l22 22H76a6 6 0 0 1-6-6V38z" fill="#a0c4ff"/><rect x="50" y="70" width="28" height="4" rx="2" fill="#1a73e8"/><rect x="50" y="80" width="20" height="4" rx="2" fill="#1a73e8"/></svg>')}`,
+					mimeType: "image/svg+xml",
+					sizes: ["any"],
+				},
+			],
 		},
 		{
 			instructions: `This server provides access to files stored in Google Drive.
