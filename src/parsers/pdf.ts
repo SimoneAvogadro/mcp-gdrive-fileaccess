@@ -1,6 +1,16 @@
-import { getDocumentProxy, extractText, extractImages } from "unpdf";
+import { definePDFJSModule, getDocumentProxy, extractText, extractImages } from "unpdf";
 import { encode } from "fast-png";
 import type { ExtractedImage } from "./docx-images";
+
+// unpdf's built-in pdfjs bundle crashes on Cloudflare Workers.
+// Use pdfjs-serverless directly, which is designed for edge runtimes.
+let pdfjsReady: Promise<void> | undefined;
+function ensurePDFJS(): Promise<void> {
+	if (!pdfjsReady) {
+		pdfjsReady = definePDFJSModule(() => import("pdfjs-serverless"));
+	}
+	return pdfjsReady;
+}
 
 export interface PageText {
 	pageNumber: number;
@@ -12,6 +22,7 @@ export interface PageText {
  * Images are appended as placeholders at the end of each page's text (similar to PPTX slides).
  */
 export async function parsePdfWithImages(buffer: ArrayBuffer): Promise<{ pages: PageText[]; imageNames: string[] }> {
+	await ensurePDFJS();
 	const data = new Uint8Array(buffer);
 	const pdf = await getDocumentProxy(data);
 
@@ -55,6 +66,7 @@ export async function parsePdfWithImages(buffer: ArrayBuffer): Promise<{ pages: 
  * @returns Array of extracted images with fileName, mimeType, and PNG data
  */
 export async function extractPdfImages(buffer: ArrayBuffer, filterNames?: string[]): Promise<ExtractedImage[]> {
+	await ensurePDFJS();
 	const data = new Uint8Array(buffer);
 	const pdf = await getDocumentProxy(data);
 	const nameFilter = filterNames ? new Set(filterNames) : null;
