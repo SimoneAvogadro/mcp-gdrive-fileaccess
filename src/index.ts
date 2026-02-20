@@ -261,7 +261,7 @@ Image workflow (DOCX & PPTX):
 
 		this.server.tool(
 			"download_simplified_text_version",
-			"Recommended way to read DOCX, PPTX, and XLSX files from Google Drive. Downloads the file and returns its text content directly in the response — no URL or additional access needed. DOCX returns extracted paragraphs, PPTX returns text organized by slide, XLSX returns CSV data per sheet. All formatting, images, charts, and layout are stripped. If the user needs the original file with full formatting and layout preserved, use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
+			"Recommended way to read DOCX, PPTX, and XLSX files from Google Drive. Downloads the file and returns its text content directly in the response — no URL or additional access needed. DOCX returns extracted paragraphs, PPTX returns text organized by slide, XLSX returns CSV data per sheet. All formatting, charts, and layout are stripped. Images are replaced with [IMAGE: filename] placeholders — use the extract_images tool with those filenames to view the actual images (works for both DOCX and PPTX). If the user needs the original file with full formatting and layout preserved, use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -496,7 +496,14 @@ Image workflow (DOCX & PPTX):
 						const buffer = await drive.downloadFile(file.id);
 						console.log(`[extract_images] downloaded ${buffer.byteLength} bytes, extracting images`);
 
-						const images = extractOfficeImages(buffer, mediaPrefix, image_names);
+						// For PPTX without explicit image_names, filter to only slide-referenced images
+						// (ppt/media/ contains theme/layout/master images we don't want)
+						let filterNames = image_names;
+						if (file.mimeType === OFFICE_MIME.PPTX && !image_names) {
+							const { imageNames: slideImageNames } = parsePptxWithImages(buffer);
+							filterNames = slideImageNames;
+						}
+						const images = extractOfficeImages(buffer, mediaPrefix, filterNames);
 						if (images.length === 0) {
 							const msg = image_names
 								? `No matching images found in "${file.name}". Requested: ${image_names.join(", ")}`
