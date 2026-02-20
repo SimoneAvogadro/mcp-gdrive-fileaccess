@@ -33,8 +33,8 @@ Runs on Cloudflare Workers with `nodejs_compat`. Uses:
 1. **`search_drive(query)`** — Full-text search in Google Drive
 2. **`list_folder(folder_id?)`** — List files in a folder (root by default)
 3. **`download_file(file_id)`** — Download a file in its native format
-4. **`download_simplified_text_version(file_id)`** — Download a DOCX, PPTX, or XLSX file and return a simplified text-only version with `[IMAGE: filename]` placeholders for embedded images
-5. **`extract_images(file_id, image_names?)`** — Extract images from a DOCX or PPTX file, all or specific ones by name. For PPTX, automatically filters out theme/background images when no specific names are requested
+4. **`download_simplified_text_version(file_id)`** — Download a DOCX, PPTX, XLSX, or PDF file and return a simplified text-only version with `[IMAGE: filename]` placeholders for embedded images
+5. **`extract_images(file_id, image_names?)`** — Extract images from a DOCX, PPTX, or PDF file, all or specific ones by name. For PPTX, automatically filters out theme/background images when no specific names are requested. PDF images are extracted as PNG
 
 Files are returned as base64 resource blobs with their native MIME type. Plain text is returned as text content. Unsupported file types return an error. Google Workspace files (Google Docs, Sheets, Slides) are NOT handled by this MCP server — they are accessed via the official Claude Google Drive plugin.
 
@@ -58,6 +58,7 @@ Security: CSRF tokens via HttpOnly cookies, session binding between auth steps, 
 - **`docx.ts`** — `parseDocxWithImages(buffer)`: extracts text paragraphs from DOCX with `[IMAGE: filename]` placeholders where images appear. Returns `{ text, imageNames }`
 - **`pptx.ts`** — `parsePptxWithImages(buffer)`: extracts text per slide from PPTX with `[IMAGE: filename]` placeholders. Returns `{ slides, imageNames }`. Image names are only those referenced via `<a:blip>` in the actual slides (not theme/layout/master)
 - **`docx-images.ts`** — `extractOfficeImages(buffer, mediaPrefix, filterNames?)`: extracts image binaries from the media folder of DOCX (`word/media/`) or PPTX (`ppt/media/`), optionally filtered by name
+- **`pdf.ts`** — `parsePdfWithImages(buffer)`: extracts text per page from PDF with `[IMAGE: pageN-key]` placeholders. Returns `{ pages, imageNames }`. Uses `unpdf` for parsing and `fast-png` for encoding raw pixel data to PNG. `extractPdfImages(buffer, filterNames?)`: extracts images from PDF as PNG files
 - **`spreadsheet.ts`** — `parseSpreadsheetToCSV(buffer)`: converts XLSX sheets to CSV
 
 ### Type Definitions (`src/drive/types.ts`)

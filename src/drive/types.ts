@@ -52,5 +52,6 @@ export const TEXT_EXTRACTABLE_MIMES: Set<string> = new Set([
 	OFFICE_MIME.XLSX,
 	OFFICE_MIME.DOCX,
 	OFFICE_MIME.PPTX,
+	OTHER_MIME.PDF,
 ]);
 

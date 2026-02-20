@@ -9,6 +9,7 @@ import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
 import { parseDocxWithImages } from "./parsers/docx";
 import { extractOfficeImages } from "./parsers/docx-images";
 import { parsePptxWithImages } from "./parsers/pptx";
+import { parsePdfWithImages, extractPdfImages } from "./parsers/pdf";
 import { refreshAccessToken, type Props } from "./utils";
 
 const BINARY_MIMES: Set<string> = new Set([
@@ -51,15 +52,15 @@ export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Pr
 			instructions: `This server provides access to files stored in Google Drive.
 
 IMPORTANT — choosing the right download tool:
-• For DOCX, XLSX, or PPTX files: PREFER download_simplified_text_version. It returns the file's text content directly in the response, which is faster and more reliable. Only use download_file for these formats if the user explicitly needs the original binary file (e.g., to preserve formatting, images, or layout).
-• For PDFs, images, ODT, ODS, and plain text files: use download_file (download_simplified_text_version does not support these).
+• For DOCX, XLSX, PPTX, or PDF files: PREFER download_simplified_text_version. It returns the file's text content directly in the response, which is faster and more reliable. Only use download_file for these formats if the user explicitly needs the original binary file (e.g., to preserve formatting, images, or layout).
+• For images, ODT, ODS, and plain text files: use download_file (download_simplified_text_version does not support these).
 • For Google Docs, Sheets, or Slides: use the built-in Google Drive integration instead (neither tool supports Google Workspace files).
 
-Image workflow (DOCX & PPTX):
-• download_simplified_text_version for DOCX and PPTX files includes [IMAGE: filename] placeholders showing where images appear in the document.
+Image workflow (DOCX, PPTX & PDF):
+• download_simplified_text_version for DOCX, PPTX, and PDF files includes [IMAGE: filename] placeholders showing where images appear in the document.
 • To view specific images, use extract_images with the filenames from the placeholders.
 • You can extract all images at once (omit image_names) or request only specific ones.
-• Works with both DOCX and PPTX files.`,
+• Works with DOCX, PPTX, and PDF files. PDF images are extracted as PNG.`,
 		},
 	);
 
@@ -261,7 +262,7 @@ Image workflow (DOCX & PPTX):
 
 		this.server.tool(
 			"download_simplified_text_version",
-			"Recommended way to read DOCX, PPTX, and XLSX files from Google Drive. Downloads the file and returns its text content directly in the response — no URL or additional access needed. DOCX returns extracted paragraphs, PPTX returns text organized by slide, XLSX returns CSV data per sheet. All formatting, charts, and layout are stripped. Images are replaced with [IMAGE: filename] placeholders — use the extract_images tool with those filenames to view the actual images (works for both DOCX and PPTX). If the user needs the original file with full formatting and layout preserved, use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
+			"Recommended way to read DOCX, PPTX, XLSX, and PDF files from Google Drive. Downloads the file and returns its text content directly in the response — no URL or additional access needed. DOCX returns extracted paragraphs, PPTX returns text organized by slide, PDF returns text organized by page, XLSX returns CSV data per sheet. All formatting, charts, and layout are stripped. Images are replaced with [IMAGE: filename] placeholders — use the extract_images tool with those filenames to view the actual images (works for DOCX, PPTX, and PDF). If the user needs the original file with full formatting and layout preserved, use download_file instead. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -318,7 +319,7 @@ Image workflow (DOCX & PPTX):
 							return {
 								content: [{
 									type: "text",
-									text: `This tool only supports DOCX, PPTX, and XLSX files. The file "${file.name}" has type ${mimeType}. Use download_file instead.`,
+									text: `This tool only supports DOCX, PPTX, XLSX, and PDF files. The file "${file.name}" has type ${mimeType}. Use download_file instead.`,
 								}],
 								isError: true,
 							};
@@ -385,6 +386,46 @@ Image workflow (DOCX & PPTX):
 							}
 						}
 
+						// PDF → text per page with image placeholders
+						if (mimeType === OTHER_MIME.PDF) {
+							try {
+								const { pages, imageNames } = await parsePdfWithImages(buffer);
+								if (pages.length === 0) {
+									return {
+										content: [{ type: "text", text: `The PDF "${file.name}" contains no extractable text or images. It may be a scanned document.` }],
+									};
+								}
+								console.log(`[download_simplified_text_version] PDF parsed (${pages.length} page(s), ${imageNames.length} image(s))`);
+								const content: { type: "text"; text: string }[] = [];
+								for (const page of pages) {
+									content.push({
+										type: "text",
+										text: `--- Page ${page.pageNumber} ---\n${page.text}`,
+									});
+								}
+								return { content };
+							} catch (parseErr) {
+								const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+								console.error(`[download_simplified_text_version] PDF parse error:`, parseErr);
+								if (msg.includes("password") || msg.includes("encrypted")) {
+									return {
+										content: [{
+											type: "text",
+											text: `The PDF "${file.name}" is password-protected or encrypted and cannot be parsed. Use download_file to get the raw binary instead.`,
+										}],
+										isError: true,
+									};
+								}
+								return {
+									content: [{
+										type: "text",
+										text: `Failed to parse PDF "${file.name}": ${msg}`,
+									}],
+									isError: true,
+								};
+							}
+						}
+
 						// XLSX → CSV per sheet (existing logic)
 						let sheets;
 						try {
@@ -436,7 +477,7 @@ Image workflow (DOCX & PPTX):
 
 		this.server.tool(
 			"extract_images",
-			"Extract images from a DOCX or PPTX file on Google Drive. Use this after download_simplified_text_version to retrieve the actual images referenced by [IMAGE: filename] placeholders in the text. You can extract all images or specific ones by name. Returns images as inline image content. You can pass either the file ID or the exact file name.",
+			"Extract images from a DOCX, PPTX, or PDF file on Google Drive. Use this after download_simplified_text_version to retrieve the actual images referenced by [IMAGE: filename] placeholders in the text. You can extract all images or specific ones by name. Returns images as inline image content. PDF images are extracted as PNG. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -476,34 +517,36 @@ Image workflow (DOCX & PPTX):
 							file = matches[0];
 						}
 
-						// Determine media prefix based on file type
-						let mediaPrefix: string;
-						if (file.mimeType === OFFICE_MIME.DOCX) {
-							mediaPrefix = "word/media/";
-						} else if (file.mimeType === OFFICE_MIME.PPTX) {
-							mediaPrefix = "ppt/media/";
-						} else {
+						// Validate supported file types
+						if (file.mimeType !== OFFICE_MIME.DOCX && file.mimeType !== OFFICE_MIME.PPTX && file.mimeType !== OTHER_MIME.PDF) {
 							return {
 								content: [{
 									type: "text",
-									text: `This tool only supports DOCX and PPTX files. The file "${file.name}" has type ${file.mimeType}.`,
+									text: `This tool only supports DOCX, PPTX, and PDF files. The file "${file.name}" has type ${file.mimeType}.`,
 								}],
 								isError: true,
 							};
 						}
 
-						console.log(`[extract_images] downloading ${file.mimeType === OFFICE_MIME.DOCX ? "DOCX" : "PPTX"}`);
+						console.log(`[extract_images] downloading file`);
 						const buffer = await drive.downloadFile(file.id);
 						console.log(`[extract_images] downloaded ${buffer.byteLength} bytes, extracting images`);
 
-						// For PPTX without explicit image_names, filter to only slide-referenced images
-						// (ppt/media/ contains theme/layout/master images we don't want)
-						let filterNames = image_names;
-						if (file.mimeType === OFFICE_MIME.PPTX && !image_names) {
-							const { imageNames: slideImageNames } = parsePptxWithImages(buffer);
-							filterNames = slideImageNames;
+						let images: { fileName: string; mimeType: string; data: Uint8Array }[];
+						if (file.mimeType === OTHER_MIME.PDF) {
+							images = await extractPdfImages(buffer, image_names);
+						} else {
+							// DOCX or PPTX — use ZIP-based extraction
+							const mediaPrefix = file.mimeType === OFFICE_MIME.DOCX ? "word/media/" : "ppt/media/";
+							// For PPTX without explicit image_names, filter to only slide-referenced images
+							// (ppt/media/ contains theme/layout/master images we don't want)
+							let filterNames = image_names;
+							if (file.mimeType === OFFICE_MIME.PPTX && !image_names) {
+								const { imageNames: slideImageNames } = parsePptxWithImages(buffer);
+								filterNames = slideImageNames;
+							}
+							images = extractOfficeImages(buffer, mediaPrefix, filterNames);
 						}
-						const images = extractOfficeImages(buffer, mediaPrefix, filterNames);
 						if (images.length === 0) {
 							const msg = image_names
 								? `No matching images found in "${file.name}". Requested: ${image_names.join(", ")}`
