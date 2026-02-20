@@ -27,21 +27,23 @@ function getExtension(fileName: string): string {
 }
 
 /**
- * Extract images from a DOCX file.
+ * Extract images from a DOCX or PPTX file.
  *
- * @param buffer - The DOCX file as an ArrayBuffer
+ * @param buffer - The Office file as an ArrayBuffer
+ * @param mediaPrefix - ZIP path prefix for media files (e.g. "word/media/" for DOCX, "ppt/media/" for PPTX)
  * @param imageNames - Optional list of image filenames to extract. If omitted, all images are returned.
  * @returns Array of extracted images with fileName, mimeType, and raw data
  */
-export function extractDocxImages(
+export function extractOfficeImages(
 	buffer: ArrayBuffer,
+	mediaPrefix: string,
 	imageNames?: string[],
 ): ExtractedImage[] {
 	const data = new Uint8Array(buffer);
 	const nameFilter = imageNames ? new Set(imageNames) : null;
 
 	const files = unzipSync(data, {
-		filter: (file) => file.name.startsWith("word/media/"),
+		filter: (file) => file.name.startsWith(mediaPrefix),
 	});
 
 	const results: ExtractedImage[] = [];

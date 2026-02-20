@@ -7,8 +7,8 @@ import { createDriveClient, TokenExpiredError } from "./drive/client";
 import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES } from "./drive/types";
 import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
 import { parseDocxWithImages } from "./parsers/docx";
-import { extractDocxImages } from "./parsers/docx-images";
-import { parsePptxToText } from "./parsers/pptx";
+import { extractOfficeImages } from "./parsers/docx-images";
+import { parsePptxWithImages } from "./parsers/pptx";
 import { refreshAccessToken, type Props } from "./utils";
 
 const BINARY_MIMES: Set<string> = new Set([
@@ -55,10 +55,11 @@ IMPORTANT — choosing the right download tool:
 • For PDFs, images, ODT, ODS, and plain text files: use download_file (download_simplified_text_version does not support these).
 • For Google Docs, Sheets, or Slides: use the built-in Google Drive integration instead (neither tool supports Google Workspace files).
 
-DOCX image workflow:
-• download_simplified_text_version for DOCX files includes [IMAGE: filename] placeholders showing where images appear in the text.
-• To view specific images, use extract_docx_images with the filenames from the placeholders.
-• You can extract all images at once (omit image_names) or request only specific ones.`,
+Image workflow (DOCX & PPTX):
+• download_simplified_text_version for DOCX and PPTX files includes [IMAGE: filename] placeholders showing where images appear in the document.
+• To view specific images, use extract_images with the filenames from the placeholders.
+• You can extract all images at once (omit image_names) or request only specific ones.
+• Works with both DOCX and PPTX files.`,
 		},
 	);
 
@@ -353,16 +354,16 @@ DOCX image workflow:
 							}
 						}
 
-						// PPTX → text per slide
+						// PPTX → text per slide with image placeholders
 						if (mimeType === OFFICE_MIME.PPTX) {
 							try {
-								const slides = parsePptxToText(buffer);
+								const { slides, imageNames } = parsePptxWithImages(buffer);
 								if (slides.length === 0) {
 									return {
 										content: [{ type: "text", text: `The presentation "${file.name}" contains no text.` }],
 									};
 								}
-								console.log(`[download_simplified_text_version] PPTX parsed (${slides.length} slide(s))`);
+								console.log(`[download_simplified_text_version] PPTX parsed (${slides.length} slide(s), ${imageNames.length} image(s))`);
 								const content: { type: "text"; text: string }[] = [];
 								for (const slide of slides) {
 									content.push({
@@ -434,8 +435,8 @@ DOCX image workflow:
 		);
 
 		this.server.tool(
-			"extract_docx_images",
-			"Extract images from a DOCX file on Google Drive. Use this after download_simplified_text_version to retrieve the actual images referenced by [IMAGE: filename] placeholders in the text. You can extract all images or specific ones by name. Returns images as inline image content. You can pass either the file ID or the exact file name.",
+			"extract_images",
+			"Extract images from a DOCX or PPTX file on Google Drive. Use this after download_simplified_text_version to retrieve the actual images referenced by [IMAGE: filename] placeholders in the text. You can extract all images or specific ones by name. Returns images as inline image content. You can pass either the file ID or the exact file name.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -448,7 +449,7 @@ DOCX image workflow:
 						isError: true,
 					};
 				}
-				console.log(`[extract_docx_images] file_id="${file_id ?? ""}" file_name="${file_name ?? ""}" image_names=${image_names ? JSON.stringify(image_names) : "all"}`);
+				console.log(`[extract_images] file_id="${file_id ?? ""}" file_name="${file_name ?? ""}" image_names=${image_names ? JSON.stringify(image_names) : "all"}`);
 				try {
 					return await this.withTokenRefresh(async (drive) => {
 						let file;
@@ -456,7 +457,7 @@ DOCX image workflow:
 							file = await drive.getFileMetadata(file_id);
 						} else {
 							const matches = await drive.findByName(file_name!);
-							console.log(`[extract_docx_images] name lookup "${file_name}" → ${matches.length} match(es)`);
+							console.log(`[extract_images] name lookup "${file_name}" → ${matches.length} match(es)`);
 							if (matches.length === 0) {
 								return {
 									content: [{ type: "text", text: `No file found with name "${file_name}".` }],
@@ -475,21 +476,27 @@ DOCX image workflow:
 							file = matches[0];
 						}
 
-						if (file.mimeType !== OFFICE_MIME.DOCX) {
+						// Determine media prefix based on file type
+						let mediaPrefix: string;
+						if (file.mimeType === OFFICE_MIME.DOCX) {
+							mediaPrefix = "word/media/";
+						} else if (file.mimeType === OFFICE_MIME.PPTX) {
+							mediaPrefix = "ppt/media/";
+						} else {
 							return {
 								content: [{
 									type: "text",
-									text: `This tool only supports DOCX files. The file "${file.name}" has type ${file.mimeType}.`,
+									text: `This tool only supports DOCX and PPTX files. The file "${file.name}" has type ${file.mimeType}.`,
 								}],
 								isError: true,
 							};
 						}
 
-						console.log(`[extract_docx_images] downloading DOCX`);
+						console.log(`[extract_images] downloading ${file.mimeType === OFFICE_MIME.DOCX ? "DOCX" : "PPTX"}`);
 						const buffer = await drive.downloadFile(file.id);
-						console.log(`[extract_docx_images] downloaded ${buffer.byteLength} bytes, extracting images`);
+						console.log(`[extract_images] downloaded ${buffer.byteLength} bytes, extracting images`);
 
-						const images = extractDocxImages(buffer, image_names);
+						const images = extractOfficeImages(buffer, mediaPrefix, image_names);
 						if (images.length === 0) {
 							const msg = image_names
 								? `No matching images found in "${file.name}". Requested: ${image_names.join(", ")}`
@@ -497,7 +504,7 @@ DOCX image workflow:
 							return { content: [{ type: "text", text: msg }] };
 						}
 
-						console.log(`[extract_docx_images] extracted ${images.length} image(s)`);
+						console.log(`[extract_images] extracted ${images.length} image(s)`);
 						const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
 							{ type: "text", text: `Extracted ${images.length} image(s) from "${file.name}": ${images.map((i) => i.fileName).join(", ")}` },
 						];
@@ -511,7 +518,7 @@ DOCX image workflow:
 						return { content };
 					});
 				} catch (err) {
-					console.error(`[extract_docx_images] error:`, err);
+					console.error(`[extract_images] error:`, err);
 					return this.handleDriveError(err);
 				}
 			},
