@@ -1,8 +1,14 @@
 # MCP GDrive FileAccess
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that gives Claude access to your Google Drive files. It runs on Cloudflare Workers and lets Claude search, browse, and download documents in their native format.
+Why this MCP?
 
-Deploy-ready on Cloudflare Workers — just configure your Google credentials, create a KV namespace, and `npm run deploy`.
+Claude's built-in Google Drive integration only reads **Google Workspace files** (Docs, Sheets, Slides). If your Drive contains Office documents, PDFs, or images, Claude can't access them. This MCP server fills that gap — it lets Claude search, browse, and read **DOCX, XLSX, PPTX, PDF, plain text and images** directly from your Google Drive.
+
+Runs on Cloudflare Workers — configure your Google credentials, create a KV namespace, and `npm run deploy`.
+
+Also: install it in CloudFlare and access it from your mobile and any other platform.
+
+Bonus: you can install using the Cloudflare free tier and avoid going thru third parties.
 
 ## Features
 
@@ -14,7 +20,8 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
   - PDF, ODT, ODS
   - Plain text (TXT, CSV, HTML, XML)
   - Images (PNG, JPG, GIF, etc.)
-- **Quick text extraction** — returns a simplified text-only version of DOCX, PPTX, and XLSX files (no formatting, images, or layout) for fast text analysis
+- **Quick text extraction** — returns a simplified text-only version of DOCX, PPTX, and XLSX files with `[IMAGE: filename]` placeholders for embedded images
+- **Image extraction** — retrieve actual images from DOCX and PPTX files, individually or all at once
 
 > **Note:** Google Workspace files (Google Docs, Sheets, Slides) are not handled by this server — use the official Claude Google Drive integration for those.
 
@@ -25,7 +32,8 @@ Deploy-ready on Cloudflare Workers — just configure your Google credentials, c
 | `search_drive(query)` | Full-text search across Google Drive |
 | `list_folder(folder_id?)` | List files in a folder (root by default) |
 | `download_file(file_id, file_name)` | Download a file in its native format |
-| `download_simplified_text_version(file_id, file_name)` | Simplified text-only extraction from DOCX, PPTX, or XLSX (no formatting/images) |
+| `download_simplified_text_version(file_id, file_name)` | Text extraction from DOCX, PPTX, or XLSX with `[IMAGE: filename]` placeholders |
+| `extract_images(file_id, file_name, image_names?)` | Extract images from DOCX or PPTX (all or specific ones by name) |
 
 ## Prerequisites
 
@@ -87,7 +95,8 @@ Cloudflare Worker
     ├── search_drive
     ├── list_folder
     ├── download_file
-    └── download_simplified_text_version
+    ├── download_simplified_text_version
+    └── extract_images
 ```
 
 - **KV (`OAUTH_KV`)** stores OAuth state with a 10-minute TTL
