@@ -8,7 +8,7 @@ Runs on Cloudflare Workers — configure your Google credentials, create a KV na
 
 Also: install it in CloudFlare and access it from your mobile and any other platform.
 
-Bonus: you can install using the Cloudflare free tier and avoid going thru third parties.
+Bonus: you can install using the Cloudflare free tier and avoid going thru third parties!
 
 ## Features
 
