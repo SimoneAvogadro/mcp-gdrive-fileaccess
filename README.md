@@ -20,8 +20,9 @@ Bonus: you can install using the Cloudflare free tier and avoid going thru third
   - PDF, ODT, ODS
   - Plain text (TXT, CSV, HTML, XML)
   - Images (PNG, JPG, GIF, etc.)
-- **Quick text extraction** — returns a simplified text-only version of DOCX, PPTX, and XLSX files with `[IMAGE: filename]` placeholders for embedded images
-- **Image extraction** — retrieve actual images from DOCX and PPTX files, individually or all at once
+- **Quick text extraction** — returns a simplified text-only version of DOCX, PPTX, XLSX, and PDF files with `[IMAGE: filename]` placeholders for embedded images
+- **Image extraction** — retrieve actual images from DOCX, PPTX, and PDF files, individually or all at once
+- **Access control** — optionally restrict access by email address and/or domain via `WHITELIST_USERS` and `WHITELIST_DOMAINS`
 
 > **Note:** Google Workspace files (Google Docs, Sheets, Slides) are not handled by this server — use the official Claude Google Drive integration for those.
 
@@ -32,8 +33,8 @@ Bonus: you can install using the Cloudflare free tier and avoid going thru third
 | `search_drive(query)` | Full-text search across Google Drive |
 | `list_folder(folder_id?)` | List files in a folder (root by default) |
 | `download_file(file_id, file_name)` | Download a file in its native format |
-| `download_simplified_text_version(file_id, file_name)` | Text extraction from DOCX, PPTX, or XLSX with `[IMAGE: filename]` placeholders |
-| `extract_images(file_id, file_name, image_names?)` | Extract images from DOCX or PPTX (all or specific ones by name) |
+| `download_simplified_text_version(file_id, file_name)` | Text extraction from DOCX, PPTX, XLSX, or PDF with `[IMAGE: filename]` placeholders |
+| `extract_images(file_id, file_name, image_names?)` | Extract images from DOCX, PPTX, or PDF (all or specific ones by name) |
 
 ## Prerequisites
 
@@ -51,12 +52,13 @@ Bonus: you can install using the Cloudflare free tier and avoid going thru third
    npm install
    ```
 
-2. **Create a `.dev.vars` file** with your secrets:
+2. **Create a `.dev.vars` file** from the provided template:
 
+   ```bash
+   cp .dev.vars.example .dev.vars
    ```
-   GOOGLE_CLIENT_ID=your-google-client-id
-   GOOGLE_CLIENT_SECRET=your-google-client-secret
-   ```
+
+   Then fill in your Google OAuth credentials. Optionally uncomment and set `WHITELIST_USERS` / `WHITELIST_DOMAINS` to restrict access (see [Access Control](#access-control) below).
 
    > **Note:** `.dev.vars` contains secrets and is listed in `.gitignore`. Never commit it to version control.
 
@@ -83,7 +85,22 @@ Bonus: you can install using the Cloudflare free tier and avoid going thru third
    ```bash
    npx wrangler secret put GOOGLE_CLIENT_ID
    npx wrangler secret put GOOGLE_CLIENT_SECRET
+   # Optional — restrict access (see Access Control below):
+   # npx wrangler secret put WHITELIST_USERS
+   # npx wrangler secret put WHITELIST_DOMAINS
    ```
+
+## Access Control
+
+By default, any user who authenticates with Google can use the server. To restrict access, set one or both of these environment variables (in `.dev.vars` for local development, or as worker secrets for production):
+
+| Variable | Description |
+|----------|-------------|
+| `WHITELIST_USERS` | Comma-separated list of allowed email addresses (e.g. `alice@example.com,bob@example.com`) |
+| `WHITELIST_DOMAINS` | Comma-separated list of allowed email domains (e.g. `example.com,company.org`) |
+
+- If **neither** is set, all authenticated users are allowed.
+- If **one or both** are set, the user must match at least one entry. Unauthorized users receive a 403 at the OAuth callback and an "Access denied" error on tool calls.
 
 ## Architecture
 
