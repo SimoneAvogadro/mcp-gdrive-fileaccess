@@ -18,8 +18,9 @@ Bonus: you can install using the Cloudflare free tier and avoid going thru third
 - **Download** files preserving their native format:
   - Office documents (DOCX, XLSX, PPTX, DOC, XLS, PPT)
   - PDF, ODT, ODS
-  - Plain text (TXT, CSV, HTML, XML)
-  - Images (PNG, JPG, GIF, etc.)
+  - Plain text (TXT, CSV, HTML, XML) — returned as inline text
+  - Images (PNG, JPG, GIF, etc.) — returned as inline images
+  - Binary files (Office, PDF, ODT, ODS) — served as a one-time temporary download URL (5-minute expiry)
 - **Quick text extraction** — returns a simplified text-only version of DOCX, PPTX, XLSX, and PDF files with `[IMAGE: filename]` placeholders for embedded images
 - **Image extraction** — retrieve actual images from DOCX, PPTX, and PDF files, individually or all at once
 - **Access control** — optionally restrict access by email address and/or domain via `WHITELIST_USERS` and `WHITELIST_DOMAINS`

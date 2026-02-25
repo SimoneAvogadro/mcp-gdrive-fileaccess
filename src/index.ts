@@ -143,7 +143,7 @@ Image workflow (DOCX, PPTX & PDF):
 
 		this.server.tool(
 			"download_file",
-			"Download a file from Google Drive in its native binary format. Returns the file as a temporary download URL (for Office/PDF/ODT/ODS) or inline content (for text and images). Supported types: DOC/DOCX, XLS/XLSX, PPT/PPTX, PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Binary files larger than 25 MB are not supported. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. IMPORTANT: For DOCX, XLSX, and PPTX files, prefer download_simplified_text_version instead — it returns the text content directly without requiring URL access. Only use this tool for those formats when the user explicitly needs the original binary file with full formatting, images, or layout. You can pass either the file ID or the exact file name.",
+			"Download a file from Google Drive in its native binary format. Returns the file as a temporary download URL (for Office/PDF/ODT/ODS) or inline content (for text and images). Supported types: DOC/DOCX, XLS/XLSX, PPT/PPTX, PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images. Binary files larger than 25 MB are not supported. Google Workspace files (Google Docs, Sheets, Slides) are not supported — use the built-in Google Drive integration for those. IMPORTANT: For DOCX, XLSX, and PPTX files, prefer download_simplified_text_version instead — it returns the text content directly without requiring URL access. Only use this tool for those formats when the user explicitly needs the original binary file with full formatting, images, or layout. You can pass either the file ID or the exact file name. WARNING: the temporary download URL for binary files is single-use and expires in 5 minutes — do NOT reuse it or share it; call this tool again if you need to download the same file a second time.",
 			{
 				file_id: z.string().optional().describe("Google Drive file ID to download"),
 				file_name: z.string().optional().describe("Exact file name to download (alternative to file_id). If multiple files match, returns a list to disambiguate."),
@@ -238,7 +238,7 @@ Image workflow (DOCX, PPTX & PDF):
 							return {
 								content: [{
 									type: "text",
-									text: `File ready for download:\n${downloadUrl}\n\nFile: ${file.name}\nType: ${mimeType}\nSize: ${buffer.byteLength} bytes\n\nNote: this link expires in 5 minutes and can only be used once.`,
+									text: `File ready for download:\n${downloadUrl}\n\nFile: ${file.name}\nType: ${mimeType}\nSize: ${buffer.byteLength} bytes\n\nWARNING: this link is single-use and expires in 5 minutes. Do NOT reuse it — call download_file again if you need the file a second time.`,
 								}],
 							};
 						}
