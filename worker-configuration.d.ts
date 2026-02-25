@@ -5,4 +5,6 @@ interface CloudflareEnv {
 	GOOGLE_CLIENT_ID: string;
 	GOOGLE_CLIENT_SECRET: string;
 	MCP_OBJECT: DurableObjectNamespace<import("./src/index").OfficeMCP>;
+	WHITELIST_USERS?: string;
+	WHITELIST_DOMAINS?: string;
 }

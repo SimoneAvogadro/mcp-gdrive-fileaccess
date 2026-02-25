@@ -165,6 +165,19 @@ app.get("/callback", async (c) => {
 		name?: string;
 	};
 
+	// Whitelist check
+	const whitelistUsers = c.env.WHITELIST_USERS;
+	const whitelistDomains = c.env.WHITELIST_DOMAINS;
+	if (whitelistUsers || whitelistDomains) {
+		const email = (userInfo.email || "").toLowerCase();
+		const domain = email.split("@")[1] || "";
+		const allowedUsers = whitelistUsers ? whitelistUsers.split(",").map((u) => u.trim().toLowerCase()) : [];
+		const allowedDomains = whitelistDomains ? whitelistDomains.split(",").map((d) => d.trim().toLowerCase()) : [];
+		if (!allowedUsers.includes(email) && !allowedDomains.includes(domain)) {
+			return c.text(`Access denied: ${userInfo.email} is not authorized to use this service.`, 403);
+		}
+	}
+
 	// Complete authorization — store props in the MCP token
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
 		metadata: {

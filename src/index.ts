@@ -575,7 +575,22 @@ Image workflow (DOCX, PPTX & PDF):
 		);
 	}
 
+	private checkWhitelist() {
+		const { WHITELIST_USERS, WHITELIST_DOMAINS } = this.env;
+		if (!WHITELIST_USERS && !WHITELIST_DOMAINS) return;
+
+		const email = (this.props?.email || "").toLowerCase();
+		const domain = email.split("@")[1] || "";
+		const allowedUsers = WHITELIST_USERS ? WHITELIST_USERS.split(",").map((u) => u.trim().toLowerCase()) : [];
+		const allowedDomains = WHITELIST_DOMAINS ? WHITELIST_DOMAINS.split(",").map((d) => d.trim().toLowerCase()) : [];
+
+		if (!allowedUsers.includes(email) && !allowedDomains.includes(domain)) {
+			throw new Error(`Access denied: ${this.props?.email || "unknown"} is not authorized to use this service.`);
+		}
+	}
+
 	private getDriveClient() {
+		this.checkWhitelist();
 		if (!this.props?.accessToken) {
 			throw new Error("Not authenticated. Please sign in with Google first.");
 		}
