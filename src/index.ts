@@ -4,7 +4,7 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError, InsufficientScopeError } from "./drive/client";
-import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES, MEMORY_ALLOWED_MIMES, MEMORY_MAX_SIZE, MEMORY_ROOT_SEGMENTS } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES, MEMORY_ALLOWED_MIMES, MEMORY_MAX_SIZE, MEMORY_ROOT_SEGMENTS, UPLOAD_ALLOWED_EXTENSIONS } from "./drive/types";
 import type { DriveClient } from "./drive/client";
 import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
 import { parseDocxWithImages } from "./parsers/docx";
@@ -66,26 +66,49 @@ Image workflow (DOCX, PPTX & PDF):
 Shared memory (AI/Claude folder on Google Drive):
 • Use write_memory_file, read_memory_file, list_memory_files, delete_memory_file to store and retrieve notes and reference material SHARED between Claude Code, Claude Desktop, and Claude Web.
 • All memory files live in a managed "AI/Claude" folder on the user's Google Drive. Organize by project using subfolders (e.g., "myproject/architecture.md").
-• This is NOT a replacement for CLAUDE.md (project-local context in Claude Code) or Claude's built-in conversation memory. Use it only for content that genuinely needs to cross context boundaries or be accessible to the user directly via Google Drive.`,
+• This is NOT a replacement for CLAUDE.md (project-local context in Claude Code) or Claude's built-in conversation memory. Use it only for content that genuinely needs to cross context boundaries or be accessible to the user directly via Google Drive.
+
+Uploading files (upload_file):
+• Creates a NEW file on Google Drive — never overwrites existing files with the same name.
+• Use versioned file names (e.g., report_v2.docx, data_2026-02.xlsx) to avoid conflicts.
+• Supports office documents, PDF, text, images, and OpenDocument formats. Max 5 MB.
+• Text content is passed as-is; binary content (images, Office, PDF) must be base64-encoded.`,
 		},
 	);
 
 	/** Registered memory tools — toggled visible/hidden based on props.mode */
 	private memoryTools: RegisteredTool[] = [];
 
+	/** Registered upload tools — toggled visible/hidden based on props.mode */
+	private uploadTools: RegisteredTool[] = [];
+
 	/** Base URL captured from the first incoming request (e.g. "https://my-worker.example.com") */
 	private baseUrl = "";
 
 	async _init(props: Props) {
 		await super._init(props);
-		this.syncMemoryToolVisibility();
+
+		// Legacy migration: old "full" sessions (before version field) meant "memory only"
+		if (!this.props.version) {
+			if (this.props.mode === "full") this.props.mode = "memory";
+			this.props.version = 2;
+			await this.ctx.storage.put("props", this.props);
+		}
+
+		this.syncToolVisibility();
 	}
 
-	private syncMemoryToolVisibility() {
-		const shouldEnable = this.props?.mode !== "readonly";
+	private syncToolVisibility() {
+		const mode = this.props?.mode;
+		// Memory: enabled for "memory" and "full"
+		const enableMemory = mode === "memory" || mode === "full";
 		for (const tool of this.memoryTools) {
-			if (shouldEnable) tool.enable();
-			else tool.disable();
+			if (enableMemory) tool.enable(); else tool.disable();
+		}
+		// Upload: enabled only for "full"
+		const enableUpload = mode === "full";
+		for (const tool of this.uploadTools) {
+			if (enableUpload) tool.enable(); else tool.disable();
 		}
 	}
 
@@ -752,6 +775,135 @@ Shared memory (AI/Claude folder on Google Drive):
 				}
 			},
 		));
+
+		const UPLOAD_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+		const supportedExtensions = Object.keys(UPLOAD_ALLOWED_EXTENSIONS).join(", ");
+
+		this.uploadTools.push(this.server.tool(
+			"upload_file",
+			`Upload a new file to Google Drive. Creates a NEW file — never overwrites existing files with the same name. Use versioned file names (e.g., report_v2.docx, data_2026-02.xlsx) to avoid conflicts. Supported extensions: ${supportedExtensions}. Max file size: 5 MB. For text files (.txt, .csv, .html, .xml, .md), pass plain text content. For binary files (images, Office, PDF), pass base64-encoded content.`,
+			{
+				file_name: z.string().describe("File name with extension (e.g., \"report_v2.docx\", \"photo.png\")"),
+				content: z.string().describe("File content: plain text for text files, base64-encoded for binary files"),
+				folder_id: z.string().optional().describe("Target folder ID on Google Drive (omit to upload to root)"),
+			},
+			async ({ file_name, content, folder_id }) => {
+				console.log(`[upload_file] file_name="${file_name}" folder_id="${folder_id ?? "root"}"`);
+				try {
+					// Validate extension
+					const dotIdx = file_name.lastIndexOf(".");
+					if (dotIdx === -1) {
+						return {
+							content: [{ type: "text", text: `File name must have an extension. Supported: ${supportedExtensions}` }],
+							isError: true,
+						};
+					}
+					const ext = file_name.slice(dotIdx).toLowerCase();
+					const mimeType = UPLOAD_ALLOWED_EXTENSIONS[ext];
+					if (!mimeType) {
+						return {
+							content: [{ type: "text", text: `Unsupported extension "${ext}". Supported: ${supportedExtensions}` }],
+							isError: true,
+						};
+					}
+
+					// Validate file name
+					const baseName = file_name.slice(0, dotIdx);
+					if (!baseName || baseName.trim().length === 0) {
+						return {
+							content: [{ type: "text", text: "File name cannot be empty or whitespace-only before the extension." }],
+							isError: true,
+						};
+					}
+					if (file_name.length > 255) {
+						return {
+							content: [{ type: "text", text: `File name too long (${file_name.length} chars). Maximum is 255 characters.` }],
+							isError: true,
+						};
+					}
+					if (/[\x00-\x1f\x7f]/.test(file_name)) {
+						return {
+							content: [{ type: "text", text: "File name contains invalid control characters." }],
+							isError: true,
+						};
+					}
+
+					// Encode content to bytes
+					let bytes: Uint8Array;
+					if (mimeType.startsWith("text/") || mimeType === "text/markdown") {
+						bytes = new TextEncoder().encode(content);
+					} else {
+						try {
+							const binary = atob(content);
+							bytes = new Uint8Array(binary.length);
+							for (let i = 0; i < binary.length; i++) {
+								bytes[i] = binary.charCodeAt(i);
+							}
+						} catch {
+							return {
+								content: [{ type: "text", text: "Invalid base64 content. Binary files (images, Office, PDF) must be base64-encoded." }],
+								isError: true,
+							};
+						}
+					}
+
+					// Check size
+					if (bytes.byteLength > UPLOAD_MAX_SIZE) {
+						return {
+							content: [{ type: "text", text: `File too large (${bytes.byteLength} bytes). Maximum is ${UPLOAD_MAX_SIZE} bytes (5 MB).` }],
+							isError: true,
+						};
+					}
+
+					return await this.withTokenRefresh(async (drive) => {
+						const targetFolder = folder_id ?? "root";
+
+						// Block uploads into the AI/Claude memory folder
+						if (targetFolder !== "root") {
+							const memoryRootId = await this.ctx.storage.get<string>("memoryRootFolderId");
+							if (memoryRootId && await this.isFolderInsideMemoryRoot(drive, targetFolder, memoryRootId)) {
+								return {
+									content: [{ type: "text", text: "Cannot upload to the AI/Claude memory folder. Use write_memory_file instead." }],
+									isError: true,
+								};
+							}
+						}
+
+						// Note: This duplicate check is best-effort (TOCTOU race possible with concurrent calls).
+						// createBinaryFile always uses POST, so the worst case is two files with the same name,
+						// never an overwrite of existing content.
+						const existing = await drive.findInFolder(file_name, targetFolder);
+						if (existing.length > 0) {
+							const baseName = file_name.slice(0, dotIdx);
+							return {
+								content: [{
+									type: "text",
+									text: `A file named "${file_name}" already exists in the target folder (id: ${existing[0].id}). This tool never overwrites existing files. Try a versioned name like "${baseName}_v2${ext}".`,
+								}],
+								isError: true,
+							};
+						}
+
+						const created = await drive.createBinaryFile(
+							file_name,
+							bytes,
+							mimeType,
+							targetFolder === "root" ? undefined : targetFolder,
+						);
+						console.log(`[upload_file] created file ${created.id}`);
+						return {
+							content: [{
+								type: "text",
+								text: `File uploaded successfully.\nName: ${created.name}\nID: ${created.id}\nLink: https://drive.google.com/file/d/${created.id}/view`,
+							}],
+						};
+					});
+				} catch (err) {
+					console.error(`[upload_file] error:`, err);
+					return this.handleDriveError(err);
+				}
+			},
+		));
 	}
 
 	private checkWhitelist() {
@@ -828,6 +980,25 @@ Shared memory (AI/Claude folder on Google Drive):
 			content: [{ type: "text" as const, text: `Error: ${message}` }],
 			isError: true,
 		};
+	}
+
+	/**
+	 * Check if a folder is the memory root or a subfolder of it.
+	 * Walks the parent chain up to 5 levels to detect nesting.
+	 */
+	private async isFolderInsideMemoryRoot(drive: DriveClient, folderId: string, memoryRootId: string): Promise<boolean> {
+		let currentId = folderId;
+		for (let i = 0; i < 5; i++) {
+			if (currentId === memoryRootId) return true;
+			try {
+				const meta = await drive.getFileMetadata(currentId);
+				if (!meta.parents || meta.parents.length === 0) return false;
+				currentId = meta.parents[0];
+			} catch {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	private validateMemoryPath(path: string): { segments: string[]; fileName: string; extension: string } {

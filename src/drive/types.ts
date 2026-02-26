@@ -55,6 +55,30 @@ export const TEXT_EXTRACTABLE_MIMES: Set<string> = new Set([
 	OTHER_MIME.PDF,
 ]);
 
+// Allowed file extensions for upload_file tool (extension → MIME type)
+export const UPLOAD_ALLOWED_EXTENSIONS: Record<string, string> = {
+	".docx": OFFICE_MIME.DOCX,
+	".xlsx": OFFICE_MIME.XLSX,
+	".pptx": OFFICE_MIME.PPTX,
+	".doc": OFFICE_MIME.DOC,
+	".xls": OFFICE_MIME.XLS,
+	".ppt": OFFICE_MIME.PPT,
+	".pdf": OTHER_MIME.PDF,
+	".odt": OTHER_MIME.ODT,
+	".ods": OTHER_MIME.ODS,
+	".txt": OTHER_MIME.PLAIN,
+	".csv": OTHER_MIME.CSV,
+	".html": OTHER_MIME.HTML,
+	".xml": OTHER_MIME.XML,
+	".md": "text/markdown",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+	".svg": "image/svg+xml",
+};
+
 // Shared memory file constants
 export const MEMORY_ALLOWED_MIMES: Record<string, string> = {
 	".txt": "text/plain",

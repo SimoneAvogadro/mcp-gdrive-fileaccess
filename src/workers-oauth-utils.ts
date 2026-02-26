@@ -54,7 +54,7 @@ export function validateCSRFToken(formData: FormData, request: Request): void {
 export async function createOAuthState(
 	oauthReqInfo: AuthRequest,
 	kv: KVNamespace,
-	scopeMode: "readonly" | "full" = "full",
+	scopeMode: "readonly" | "memory" | "full" = "full",
 ): Promise<{ stateToken: string }> {
 	const stateToken = crypto.randomUUID();
 	await kv.put(
@@ -68,7 +68,7 @@ export async function createOAuthState(
 export async function validateOAuthState(
 	request: Request,
 	kv: KVNamespace,
-): Promise<{ oauthReqInfo: AuthRequest; scopeMode: "readonly" | "full"; clearCookie: string }> {
+): Promise<{ oauthReqInfo: AuthRequest; scopeMode: "readonly" | "memory" | "full"; clearCookie: string }> {
 	const url = new URL(request.url);
 	const stateToken = url.searchParams.get("state");
 
@@ -102,7 +102,7 @@ export async function validateOAuthState(
 	// Backward compat: old format stored just the AuthRequest directly
 	const parsed = JSON.parse(stored);
 	let oauthReqInfo: AuthRequest;
-	let scopeMode: "readonly" | "full" = "full";
+	let scopeMode: "readonly" | "memory" | "full" = "full";
 	if (parsed.oauthReqInfo) {
 		oauthReqInfo = parsed.oauthReqInfo;
 		scopeMode = parsed.scopeMode || "full";
@@ -260,10 +260,17 @@ export function renderApprovalDialog(
                   </span>
                 </label>
                 <label class="scope-option">
+                  <input type="radio" name="scope_mode" value="memory">
+                  <span class="scope-option-text">
+                    <span class="scope-option-label">Read + Memory</span>
+                    <span class="scope-option-desc">Read-only plus shared AI memory (read/write files in an AI/Claude folder on your Drive).</span>
+                  </span>
+                </label>
+                <label class="scope-option">
                   <input type="radio" name="scope_mode" value="full">
                   <span class="scope-option-text">
-                    <span class="scope-option-label">Full access</span>
-                    <span class="scope-option-desc">Read-only plus shared AI memory (read/write files in an AI/Claude folder on your Drive).</span>
+                    <span class="scope-option-label">Read + Memory + Upload</span>
+                    <span class="scope-option-desc">All of the above, plus upload new files to any folder. Cannot overwrite existing files.</span>
                   </span>
                 </label>
               </fieldset>

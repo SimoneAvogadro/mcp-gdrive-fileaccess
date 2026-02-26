@@ -196,6 +196,43 @@ export function createDriveClient(accessToken: string) {
 		},
 
 		/**
+		 * Create a file with binary content via multipart upload.
+		 */
+		async createBinaryFile(
+			name: string,
+			content: Uint8Array,
+			mimeType: string,
+			parentId?: string,
+		): Promise<DriveFile> {
+			const metadata: Record<string, unknown> = { name };
+			if (parentId) metadata.parents = [parentId];
+			const metadataJson = JSON.stringify(metadata);
+
+			const boundary = "upload_boundary_" + crypto.randomUUID().replace(/-/g, "");
+			const encoder = new TextEncoder();
+
+			const preamble = encoder.encode(
+				`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataJson}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+			);
+			const epilogue = encoder.encode(`\r\n--${boundary}--`);
+
+			const body = new Uint8Array(preamble.length + content.length + epilogue.length);
+			body.set(preamble, 0);
+			body.set(content, preamble.length);
+			body.set(epilogue, preamble.length + content.length);
+
+			const resp = await driveRequest(
+				`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=${FIELDS}`,
+				{
+					method: "POST",
+					headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+					body,
+				},
+			);
+			return (await resp.json()) as DriveFile;
+		},
+
+		/**
 		 * Permanently delete a file.
 		 */
 		async deleteFile(fileId: string): Promise<void> {

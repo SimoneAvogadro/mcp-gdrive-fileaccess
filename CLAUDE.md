@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCP GDrive FileAccess is a Cloudflare Workers-based MCP (Model Context Protocol) server that gives Claude access to Google Drive documents. It searches, lists, and downloads office files (DOCX, XLSX, PPTX, PDFs, plain text, and images) in their native format.
+MCP GDrive FileAccess is a Cloudflare Workers-based MCP (Model Context Protocol) server that gives Claude access to Google Drive documents. It searches, lists, downloads, and uploads office files (DOCX, XLSX, PPTX, PDFs, plain text, and images) in their native format.
 
 ## Commands
 
@@ -32,8 +32,9 @@ Runs on Cloudflare Workers with `nodejs_compat`. Uses:
 
 ### Entry Point (`src/index.ts`)
 
-`OfficeMCP` extends `McpAgent` and registers 5 MCP tools. All download tools accept either `file_id` or `file_name` (at least one required):
+`OfficeMCP` extends `McpAgent` and registers MCP tools across 3 permission tiers. All download tools accept either `file_id` or `file_name` (at least one required):
 
+**Read-only tools** (always visible):
 1. **`search_drive(query)`** — Full-text search in Google Drive
 2. **`list_folder(folder_id?)`** — List files in a folder (root by default)
 3. **`download_file(file_id?, file_name?)`** — Download a file in its native format:
@@ -43,6 +44,15 @@ Runs on Cloudflare Workers with `nodejs_compat`. Uses:
    - Google Workspace files → error (use built-in Claude Google Drive integration)
 4. **`download_simplified_text_version(file_id?, file_name?)`** — Download a DOCX, PPTX, XLSX, or PDF file and return a simplified text-only version with `[IMAGE: filename]` placeholders for embedded images
 5. **`extract_images(file_id?, file_name?, image_names?)`** — Extract images from a DOCX, PPTX, or PDF file, all or specific ones by name. For PPTX, automatically filters out theme/background images when no specific names are requested. PDF images are extracted as PNG
+
+**Memory tools** (visible in "memory" and "full" modes):
+6. **`write_memory_file(path, content)`** — Write/update a file in AI/Claude folder
+7. **`read_memory_file(path)`** — Read a file from AI/Claude folder
+8. **`list_memory_files(path?)`** — List files in AI/Claude folder
+9. **`delete_memory_file(path)`** — Delete a file from AI/Claude folder
+
+**Upload tools** (visible in "full" mode only):
+10. **`upload_file(file_name, content, folder_id?)`** — Upload a new file to any folder on Google Drive. Never overwrites existing files. Rejects uploads targeting the AI/Claude memory folder (use `write_memory_file` instead). Validates file names (no control chars, no empty names, max 255 chars). Supports office documents, PDF, text, images, and OpenDocument formats. Max 5 MB. Text content passed as-is, binary content base64-encoded.
 
 Google Workspace files (Google Docs, Sheets, Slides) are NOT handled — use the official Claude Google Drive integration instead.
 
@@ -59,11 +69,20 @@ Hono-based HTTP handler implementing OAuth 2.0 with Google:
 - `GET /blob/:id` — Serve a one-time binary download stored in KV (used by `download_file`)
 - `GET /favicon.ico`, `GET /favicon.svg` — Serve the server icon (inline SVG)
 
-Security: CSRF tokens via HttpOnly cookies, session binding between auth steps, HMAC-signed client approval cookies. Scope is `drive.readonly email profile`.
+Security: CSRF tokens via HttpOnly cookies, session binding between auth steps, HMAC-signed client approval cookies.
+
+**3-tier scope model:**
+- **Read-only** → `drive.readonly email profile`
+- **Read + Memory** → `drive.readonly drive.file email profile`
+- **Read + Memory + Upload** → `drive.readonly drive.file email profile`
+
+"Memory" and "Full" use the same Google scopes; the difference is which MCP tools are visible.
 
 ### Google Drive Client (`src/drive/client.ts`)
 
-`createDriveClient(accessToken)` returns methods: `searchFiles`, `listFolder`, `findByName`, `getFileMetadata`, `downloadFile`, `exportFile`. Throws `TokenExpiredError` on 401.
+`createDriveClient(accessToken)` returns methods: `searchFiles`, `listFolder`, `findByName`, `getFileMetadata`, `downloadFile`, `exportFile`, `findInFolder`, `createFolder`, `createFile`, `createBinaryFile`, `updateFileContent`, `deleteFile`. Throws `TokenExpiredError` on 401.
+
+- `createBinaryFile(name, content, mimeType, parentId?)` — multipart upload for binary content (Uint8Array), used by `upload_file` tool
 
 - `findByName(name)` — exact name match, returns all non-trashed matches across all drives (used by tools when `file_name` is provided instead of `file_id`)
 
@@ -77,18 +96,18 @@ Security: CSRF tokens via HttpOnly cookies, session binding between auth steps, 
 
 ### Type Definitions (`src/drive/types.ts`)
 
-MIME type maps (`GOOGLE_MIME`, `OFFICE_MIME`, `OTHER_MIME`), `SPREADSHEET_MIMES` (XLSX only), `TEXT_EXTRACTABLE_MIMES` (DOCX, PPTX, XLSX, PDF), and `DriveFile` / `DriveFileList` interfaces.
+MIME type maps (`GOOGLE_MIME`, `OFFICE_MIME`, `OTHER_MIME`), `SPREADSHEET_MIMES` (XLSX only), `TEXT_EXTRACTABLE_MIMES` (DOCX, PPTX, XLSX, PDF), `UPLOAD_ALLOWED_EXTENSIONS` (extension → MIME for upload validation), and `DriveFile` / `DriveFileList` interfaces.
 
 ### Utilities (`src/utils.ts`)
 
 - `getUpstreamAuthorizeUrl(...)` — builds Google OAuth authorization URL
 - `fetchUpstreamAuthToken(...)` — exchanges auth code for Google tokens
 - `refreshAccessToken(...)` — uses a refresh token to obtain a new access token
-- `Props` type — `{ email, name, accessToken, refreshToken }` stored in the MCP token
+- `Props` type — `{ email, name, accessToken, refreshToken, mode?, version? }` stored in the MCP token. `mode` is `"readonly" | "memory" | "full"`. `version` is used for legacy migration (set to `2` on first access).
 
 ## Key Patterns
 
-- **Props** passed through MCP contain `email`, `name`, `accessToken`, `refreshToken` from Google OAuth
+- **Props** passed through MCP contain `email`, `name`, `accessToken`, `refreshToken`, `mode`, `version` from Google OAuth
 - Hono handles HTTP routing in `google-handler.ts`; JSX is configured with Hono's JSX runtime (used for the approval dialog)
 - TypeScript strict mode, ESNext target, bundler module resolution
 - `withTokenRefresh()` wraps all Drive API calls to handle expired tokens transparently

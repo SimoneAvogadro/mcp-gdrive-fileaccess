@@ -69,7 +69,8 @@ app.post("/authorize", async (c) => {
 
 		// Extract scope mode from form
 		const scopeModeRaw = formData.get("scope_mode");
-		const scopeMode: "readonly" | "full" = scopeModeRaw === "readonly" ? "readonly" : "full";
+		const scopeMode: "readonly" | "memory" | "full" =
+			scopeModeRaw === "readonly" ? "readonly" : scopeModeRaw === "memory" ? "memory" : "full";
 
 		// Add client to approved list
 		const approvedClientCookie = await addApprovedClient(
@@ -100,7 +101,7 @@ function redirectToGoogle(
 	request: Request,
 	googleClientId: string,
 	stateToken: string,
-	scopeMode: "readonly" | "full" = "full",
+	scopeMode: "readonly" | "memory" | "full" = "full",
 	headers: Record<string, string> = {},
 ) {
 	const scope = scopeMode === "readonly" ? GOOGLE_SCOPES_READONLY : GOOGLE_SCOPES_FULL;
@@ -125,7 +126,7 @@ function redirectToGoogle(
  */
 app.get("/callback", async (c) => {
 	let oauthReqInfo: AuthRequest;
-	let scopeMode: "readonly" | "full";
+	let scopeMode: "readonly" | "memory" | "full";
 	let clearSessionCookie: string;
 
 	try {
