@@ -21,6 +21,7 @@ export function getUpstreamAuthorizeUrl({
 	upstream.searchParams.set("response_type", "code");
 	upstream.searchParams.set("access_type", "offline");
 	upstream.searchParams.set("prompt", "consent");
+	upstream.searchParams.set("include_granted_scopes", "true");
 	if (state) upstream.searchParams.set("state", state);
 	return upstream.href;
 }

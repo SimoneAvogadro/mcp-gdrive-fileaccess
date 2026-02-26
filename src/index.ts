@@ -4,7 +4,8 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError } from "./drive/client";
-import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES, MEMORY_ALLOWED_MIMES, MEMORY_MAX_SIZE, MEMORY_ROOT_SEGMENTS } from "./drive/types";
+import type { DriveClient } from "./drive/client";
 import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
 import { parseDocxWithImages } from "./parsers/docx";
 import { extractOfficeImages } from "./parsers/docx-images";
@@ -60,7 +61,12 @@ Image workflow (DOCX, PPTX & PDF):
 • download_simplified_text_version for DOCX, PPTX, and PDF files includes [IMAGE: filename] placeholders showing where images appear in the document.
 • To view specific images, use extract_images with the filenames from the placeholders.
 • You can extract all images at once (omit image_names) or request only specific ones.
-• Works with DOCX, PPTX, and PDF files. PDF images are extracted as PNG.`,
+• Works with DOCX, PPTX, and PDF files. PDF images are extracted as PNG.
+
+Shared memory (AI/Claude folder on Google Drive):
+• Use write_memory_file, read_memory_file, list_memory_files, delete_memory_file to store and retrieve notes and reference material SHARED between Claude Code, Claude Desktop, and Claude Web.
+• All memory files live in a managed "AI/Claude" folder on the user's Google Drive. Organize by project using subfolders (e.g., "myproject/architecture.md").
+• This is NOT a replacement for CLAUDE.md (project-local context in Claude Code) or Claude's built-in conversation memory. Use it only for content that genuinely needs to cross context boundaries or be accessible to the user directly via Google Drive.`,
 		},
 	);
 
@@ -573,6 +579,163 @@ Image workflow (DOCX, PPTX & PDF):
 				}
 			},
 		);
+
+		this.server.tool(
+			"write_memory_file",
+			"Write or update a text file in the shared AI/Claude folder on Google Drive. This folder is accessible from Claude Code, Claude Desktop, and Claude Web — use it for notes, reference material, or context that genuinely needs to cross boundaries between these tools. NOT a replacement for CLAUDE.md (project-local) or conversation memory. Supports .txt and .md files. Organize by project/topic using subfolders (e.g., \"myproject/architecture.md\").",
+			{
+				path: z.string().describe("Relative path within AI/Claude (e.g., \"notes.md\" or \"myproject/design.md\")"),
+				content: z.string().describe("Text content to write"),
+			},
+			async ({ path, content }) => {
+				console.log(`[write_memory_file] path="${path}"`);
+				try {
+					const parsed = this.validateMemoryPath(path);
+					const contentBytes = new TextEncoder().encode(content);
+					if (contentBytes.byteLength > MEMORY_MAX_SIZE) {
+						return {
+							content: [{ type: "text", text: `Content too large (${contentBytes.byteLength} bytes). Maximum is ${MEMORY_MAX_SIZE} bytes (1 MB).` }],
+							isError: true,
+						};
+					}
+					return await this.withTokenRefresh(async (drive) => {
+						const { parentId, fileName, mimeType, existingFileId } = await this.resolveMemoryPath(drive, path);
+						if (existingFileId) {
+							await drive.updateFileContent(existingFileId, content, mimeType);
+							console.log(`[write_memory_file] updated existing file ${existingFileId}`);
+							return { content: [{ type: "text", text: `Updated AI/Claude/${path}` }] };
+						}
+						const created = await drive.createFile(fileName, content, mimeType, parentId);
+						console.log(`[write_memory_file] created file ${created.id}`);
+						return { content: [{ type: "text", text: `Created AI/Claude/${path}` }] };
+					});
+				} catch (err) {
+					console.error(`[write_memory_file] error:`, err);
+					return this.handleDriveError(err);
+				}
+			},
+		);
+
+		this.server.tool(
+			"read_memory_file",
+			"Read a text file from the shared AI/Claude folder on Google Drive. Returns the file's text content.",
+			{
+				path: z.string().describe("Relative path within AI/Claude (e.g., \"notes.md\" or \"myproject/design.md\")"),
+			},
+			async ({ path }) => {
+				console.log(`[read_memory_file] path="${path}"`);
+				try {
+					this.validateMemoryPath(path);
+					return await this.withTokenRefresh(async (drive) => {
+						const result = await this.findMemoryFile(drive, path);
+						if (!result) {
+							return {
+								content: [{ type: "text", text: `File not found: AI/Claude/${path}` }],
+								isError: true,
+							};
+						}
+						const buffer = await drive.downloadFile(result.fileId);
+						const text = new TextDecoder().decode(buffer);
+						console.log(`[read_memory_file] read ${text.length} chars from ${result.fileId}`);
+						return { content: [{ type: "text", text }] };
+					});
+				} catch (err) {
+					console.error(`[read_memory_file] error:`, err);
+					return this.handleDriveError(err);
+				}
+			},
+		);
+
+		this.server.tool(
+			"list_memory_files",
+			"List files and subfolders in the shared AI/Claude folder on Google Drive. Optionally specify a subfolder path.",
+			{
+				path: z.string().optional().describe("Subfolder path within AI/Claude (e.g., \"myproject\"). Omit to list the root AI/Claude folder."),
+			},
+			async ({ path }) => {
+				console.log(`[list_memory_files] path="${path ?? ""}"`);
+				try {
+					return await this.withTokenRefresh(async (drive) => {
+						let folderId: string;
+						if (path) {
+							// Validate that path segments are safe (no .., no file extension needed)
+							const segments = path.split("/").filter(Boolean);
+							for (const seg of segments) {
+								if (seg === ".." || seg === ".") {
+									return {
+										content: [{ type: "text", text: `Invalid path segment: "${seg}"` }],
+										isError: true,
+									};
+								}
+							}
+							// Walk the subfolder path without creating folders
+							const rootId = await this.getOrCreateMemoryRoot(drive);
+							let currentId = rootId;
+							for (const seg of segments) {
+								const matches = await drive.findInFolder(seg, currentId);
+								const folder = matches.find((f) => f.mimeType === GOOGLE_MIME.FOLDER);
+								if (!folder) {
+									return {
+										content: [{ type: "text", text: `Folder not found: AI/Claude/${path}` }],
+										isError: true,
+									};
+								}
+								currentId = folder.id;
+							}
+							folderId = currentId;
+						} else {
+							folderId = await this.getOrCreateMemoryRoot(drive);
+						}
+
+						const files = await drive.listFolder(folderId);
+						console.log(`[list_memory_files] found ${files.length} item(s)`);
+						if (files.length === 0) {
+							return { content: [{ type: "text", text: "Folder is empty." }] };
+						}
+						const result = files.map((f) => ({
+							name: f.name,
+							type: f.mimeType === GOOGLE_MIME.FOLDER ? "folder" : "file",
+							modified: f.modifiedTime,
+							size: f.size,
+							id: f.id,
+						}));
+						return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+					});
+				} catch (err) {
+					console.error(`[list_memory_files] error:`, err);
+					return this.handleDriveError(err);
+				}
+			},
+		);
+
+		this.server.tool(
+			"delete_memory_file",
+			"Permanently delete a file from the shared AI/Claude folder on Google Drive.",
+			{
+				path: z.string().describe("Relative path within AI/Claude (e.g., \"notes.md\" or \"myproject/old-notes.md\")"),
+			},
+			async ({ path }) => {
+				console.log(`[delete_memory_file] path="${path}"`);
+				try {
+					this.validateMemoryPath(path);
+					return await this.withTokenRefresh(async (drive) => {
+						const result = await this.findMemoryFile(drive, path);
+						if (!result) {
+							return {
+								content: [{ type: "text", text: `File not found: AI/Claude/${path}` }],
+								isError: true,
+							};
+						}
+						await drive.deleteFile(result.fileId);
+						console.log(`[delete_memory_file] deleted ${result.fileId}`);
+						return { content: [{ type: "text", text: `Deleted AI/Claude/${path}` }] };
+					});
+				} catch (err) {
+					console.error(`[delete_memory_file] error:`, err);
+					return this.handleDriveError(err);
+				}
+			},
+		);
 	}
 
 	private checkWhitelist() {
@@ -640,6 +803,108 @@ Image workflow (DOCX, PPTX & PDF):
 			content: [{ type: "text" as const, text: `Error: ${message}` }],
 			isError: true,
 		};
+	}
+
+	private validateMemoryPath(path: string): { segments: string[]; fileName: string; extension: string } {
+		const segments = path.split("/").filter(Boolean);
+		if (segments.length === 0) {
+			throw new Error("Path cannot be empty.");
+		}
+		if (segments.length > 5) {
+			throw new Error("Path too deep (max 5 segments).");
+		}
+		for (const seg of segments) {
+			if (seg === ".." || seg === ".") {
+				throw new Error(`Invalid path segment: "${seg}"`);
+			}
+		}
+		const fileName = segments[segments.length - 1];
+		const dotIdx = fileName.lastIndexOf(".");
+		if (dotIdx === -1) {
+			throw new Error(`File must have .txt or .md extension.`);
+		}
+		const extension = fileName.slice(dotIdx).toLowerCase();
+		if (!MEMORY_ALLOWED_MIMES[extension]) {
+			throw new Error(`Unsupported extension "${extension}". Only .txt and .md are allowed.`);
+		}
+		return { segments, fileName, extension };
+	}
+
+	private async getOrCreateMemoryRoot(drive: DriveClient): Promise<string> {
+		// Check DO storage cache
+		const cached = await this.ctx.storage.get<string>("memoryRootFolderId");
+		if (cached) {
+			try {
+				const meta = await drive.getFileMetadata(cached);
+				if (meta.mimeType === GOOGLE_MIME.FOLDER) {
+					return cached;
+				}
+			} catch {
+				// Cache is stale, fall through to recreate
+			}
+		}
+
+		// Walk MEMORY_ROOT_SEGMENTS ("AI" / "Claude"), creating as needed
+		let parentId = "root";
+		for (const segment of MEMORY_ROOT_SEGMENTS) {
+			const matches = await drive.findInFolder(segment, parentId);
+			const folder = matches.find((f) => f.mimeType === GOOGLE_MIME.FOLDER);
+			if (folder) {
+				parentId = folder.id;
+			} else {
+				const created = await drive.createFolder(segment, parentId === "root" ? undefined : parentId);
+				console.log(`[getOrCreateMemoryRoot] created folder "${segment}" → ${created.id}`);
+				parentId = created.id;
+			}
+		}
+
+		await this.ctx.storage.put("memoryRootFolderId", parentId);
+		return parentId;
+	}
+
+	private async findMemoryFile(drive: DriveClient, path: string): Promise<{ fileId: string; fileName: string } | null> {
+		const segments = path.split("/").filter(Boolean);
+		const rootId = await this.getOrCreateMemoryRoot(drive);
+		let currentId = rootId;
+
+		// Walk subfolders (all segments except the last one, which is the file)
+		for (let i = 0; i < segments.length - 1; i++) {
+			const matches = await drive.findInFolder(segments[i], currentId);
+			const folder = matches.find((f) => f.mimeType === GOOGLE_MIME.FOLDER);
+			if (!folder) return null;
+			currentId = folder.id;
+		}
+
+		const fileName = segments[segments.length - 1];
+		const matches = await drive.findInFolder(fileName, currentId);
+		if (matches.length === 0) return null;
+		return { fileId: matches[0].id, fileName };
+	}
+
+	private async resolveMemoryPath(drive: DriveClient, path: string): Promise<{ parentId: string; fileName: string; mimeType: string; existingFileId: string | null }> {
+		const { segments, fileName, extension } = this.validateMemoryPath(path);
+		const mimeType = MEMORY_ALLOWED_MIMES[extension];
+		const rootId = await this.getOrCreateMemoryRoot(drive);
+		let currentId = rootId;
+
+		// Walk/create subfolders (all segments except the last one)
+		for (let i = 0; i < segments.length - 1; i++) {
+			const matches = await drive.findInFolder(segments[i], currentId);
+			const folder = matches.find((f) => f.mimeType === GOOGLE_MIME.FOLDER);
+			if (folder) {
+				currentId = folder.id;
+			} else {
+				const created = await drive.createFolder(segments[i], currentId);
+				console.log(`[resolveMemoryPath] created subfolder "${segments[i]}" → ${created.id}`);
+				currentId = created.id;
+			}
+		}
+
+		// Check if file already exists
+		const fileMatches = await drive.findInFolder(fileName, currentId);
+		const existingFileId = fileMatches.length > 0 ? fileMatches[0].id : null;
+
+		return { parentId: currentId, fileName, mimeType, existingFileId };
 	}
 }
 

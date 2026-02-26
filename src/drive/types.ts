@@ -55,3 +55,11 @@ export const TEXT_EXTRACTABLE_MIMES: Set<string> = new Set([
 	OTHER_MIME.PDF,
 ]);
 
+// Shared memory file constants
+export const MEMORY_ALLOWED_MIMES: Record<string, string> = {
+	".txt": "text/plain",
+	".md": "text/markdown",
+};
+export const MEMORY_MAX_SIZE = 1 * 1024 * 1024;
+export const MEMORY_ROOT_SEGMENTS = ["AI", "Claude"] as const;
+
