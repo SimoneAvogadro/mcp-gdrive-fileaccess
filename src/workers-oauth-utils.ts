@@ -54,11 +54,12 @@ export function validateCSRFToken(formData: FormData, request: Request): void {
 export async function createOAuthState(
 	oauthReqInfo: AuthRequest,
 	kv: KVNamespace,
+	scopeMode: "readonly" | "full" = "full",
 ): Promise<{ stateToken: string }> {
 	const stateToken = crypto.randomUUID();
 	await kv.put(
 		`oauth_state:${stateToken}`,
-		JSON.stringify(oauthReqInfo),
+		JSON.stringify({ oauthReqInfo, scopeMode }),
 		{ expirationTtl: 600 }, // 10 minutes
 	);
 	return { stateToken };
@@ -67,7 +68,7 @@ export async function createOAuthState(
 export async function validateOAuthState(
 	request: Request,
 	kv: KVNamespace,
-): Promise<{ oauthReqInfo: AuthRequest; clearCookie: string }> {
+): Promise<{ oauthReqInfo: AuthRequest; scopeMode: "readonly" | "full"; clearCookie: string }> {
 	const url = new URL(request.url);
 	const stateToken = url.searchParams.get("state");
 
@@ -98,12 +99,21 @@ export async function validateOAuthState(
 	}
 	await kv.delete(`oauth_state:${stateToken}`);
 
-	const oauthReqInfo = JSON.parse(stored) as AuthRequest;
+	// Backward compat: old format stored just the AuthRequest directly
+	const parsed = JSON.parse(stored);
+	let oauthReqInfo: AuthRequest;
+	let scopeMode: "readonly" | "full" = "full";
+	if (parsed.oauthReqInfo) {
+		oauthReqInfo = parsed.oauthReqInfo;
+		scopeMode = parsed.scopeMode || "full";
+	} else {
+		oauthReqInfo = parsed as AuthRequest;
+	}
 
 	// Clear session cookie
 	const clearCookie = `${cookieName}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 
-	return { oauthReqInfo, clearCookie };
+	return { oauthReqInfo, scopeMode, clearCookie };
 }
 
 // --- Session Binding ---
@@ -215,6 +225,14 @@ export function renderApprovalDialog(
           .button { padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 500; cursor: pointer; border: none; font-size: 1rem; }
           .button-primary { background-color: #0070f3; color: white; }
           .button-secondary { background-color: transparent; border: 1px solid #e5e7eb; color: #333; }
+          .scope-choice { margin: 1.5rem 0; }
+          .scope-choice legend { font-weight: 500; margin-bottom: 0.75rem; font-size: 0.95rem; }
+          .scope-option { display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer; }
+          .scope-option:has(input:checked) { border-color: #0070f3; background-color: #f0f7ff; }
+          .scope-option input { margin-top: 0.2rem; }
+          .scope-option-text { flex: 1; }
+          .scope-option-label { font-weight: 500; display: block; }
+          .scope-option-desc { font-size: 0.85rem; color: #666; margin-top: 0.15rem; display: block; }
         </style>
       </head>
       <body>
@@ -232,6 +250,23 @@ export function renderApprovalDialog(
             <form method="post" action="${new URL(request.url).pathname}">
               <input type="hidden" name="state" value="${encodedState}">
               <input type="hidden" name="csrf_token" value="${csrfToken}">
+              <fieldset class="scope-choice">
+                <legend>Choose access level:</legend>
+                <label class="scope-option">
+                  <input type="radio" name="scope_mode" value="readonly" checked>
+                  <span class="scope-option-text">
+                    <span class="scope-option-label">Read-only</span>
+                    <span class="scope-option-desc">Search, list, and download files. No write access to Google Drive.</span>
+                  </span>
+                </label>
+                <label class="scope-option">
+                  <input type="radio" name="scope_mode" value="full">
+                  <span class="scope-option-text">
+                    <span class="scope-option-label">Full access</span>
+                    <span class="scope-option-desc">Read-only plus shared AI memory (read/write files in an AI/Claude folder on your Drive).</span>
+                  </span>
+                </label>
+              </fieldset>
               <div class="actions">
                 <button type="button" class="button button-secondary" onclick="window.history.back()">Cancel</button>
                 <button type="submit" class="button button-primary">Approve</button>

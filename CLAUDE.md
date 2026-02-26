@@ -12,7 +12,9 @@ MCP GDrive FileAccess is a Cloudflare Workers-based MCP (Model Context Protocol)
 - `npm run deploy` — Deploy to Cloudflare Workers
 - `npm run cf-typegen` — Regenerate Cloudflare environment types (`worker-configuration.d.ts`)
 
-No test framework is configured.
+No test framework is configured. Always validate changes with both:
+- `npx tsc --noEmit` — Type-check
+- `npx wrangler deploy --dry-run` — Verify the bundle builds and Cloudflare config is valid
 
 ## Environment Setup
 

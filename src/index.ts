@@ -1,5 +1,5 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
@@ -70,8 +70,24 @@ Shared memory (AI/Claude folder on Google Drive):
 		},
 	);
 
+	/** Registered memory tools — toggled visible/hidden based on props.mode */
+	private memoryTools: RegisteredTool[] = [];
+
 	/** Base URL captured from the first incoming request (e.g. "https://my-worker.example.com") */
 	private baseUrl = "";
+
+	async _init(props: Props) {
+		await super._init(props);
+		this.syncMemoryToolVisibility();
+	}
+
+	private syncMemoryToolVisibility() {
+		const shouldEnable = this.props?.mode !== "readonly";
+		for (const tool of this.memoryTools) {
+			if (shouldEnable) tool.enable();
+			else tool.disable();
+		}
+	}
 
 	async fetch(request: Request): Promise<Response> {
 		if (!this.baseUrl) {
@@ -580,7 +596,7 @@ Shared memory (AI/Claude folder on Google Drive):
 			},
 		);
 
-		this.server.tool(
+		this.memoryTools.push(this.server.tool(
 			"write_memory_file",
 			"Write or update a text file in the shared AI/Claude folder on Google Drive. This folder is accessible from Claude Code, Claude Desktop, and Claude Web — use it for notes, reference material, or context that genuinely needs to cross boundaries between these tools. NOT a replacement for CLAUDE.md (project-local) or conversation memory. Supports .txt and .md files. Organize by project/topic using subfolders (e.g., \"myproject/architecture.md\").",
 			{
@@ -614,9 +630,9 @@ Shared memory (AI/Claude folder on Google Drive):
 					return this.handleDriveError(err);
 				}
 			},
-		);
+		));
 
-		this.server.tool(
+		this.memoryTools.push(this.server.tool(
 			"read_memory_file",
 			"Read a text file from the shared AI/Claude folder on Google Drive. Returns the file's text content.",
 			{
@@ -644,9 +660,9 @@ Shared memory (AI/Claude folder on Google Drive):
 					return this.handleDriveError(err);
 				}
 			},
-		);
+		));
 
-		this.server.tool(
+		this.memoryTools.push(this.server.tool(
 			"list_memory_files",
 			"List files and subfolders in the shared AI/Claude folder on Google Drive. Optionally specify a subfolder path.",
 			{
@@ -706,9 +722,9 @@ Shared memory (AI/Claude folder on Google Drive):
 					return this.handleDriveError(err);
 				}
 			},
-		);
+		));
 
-		this.server.tool(
+		this.memoryTools.push(this.server.tool(
 			"delete_memory_file",
 			"Permanently delete a file from the shared AI/Claude folder on Google Drive.",
 			{
@@ -735,7 +751,7 @@ Shared memory (AI/Claude folder on Google Drive):
 					return this.handleDriveError(err);
 				}
 			},
-		);
+		));
 	}
 
 	private checkWhitelist() {

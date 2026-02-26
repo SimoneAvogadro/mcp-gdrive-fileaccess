@@ -119,4 +119,5 @@ export type Props = {
 	name: string;
 	accessToken: string;
 	refreshToken: string;
+	mode?: "readonly" | "full";
 };

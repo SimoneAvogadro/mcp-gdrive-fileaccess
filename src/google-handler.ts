@@ -7,7 +7,6 @@ import {
 	createOAuthState,
 	generateCSRFProtection,
 	getOrCreateCookieSigningKey,
-	isClientApproved,
 	OAuthError,
 	renderApprovalDialog,
 	validateCSRFToken,
@@ -17,7 +16,8 @@ import {
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
-const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file email profile";
+const GOOGLE_SCOPES_READONLY = "https://www.googleapis.com/auth/drive.readonly email profile";
+const GOOGLE_SCOPES_FULL = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file email profile";
 
 const app = new Hono<{ Bindings: CloudflareEnv & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
@@ -28,14 +28,7 @@ app.get("/authorize", async (c) => {
 		return c.text("Invalid request", 400);
 	}
 
-	// Check if client is already approved
-	if (await isClientApproved(c.req.raw, clientId, await getOrCreateCookieSigningKey(c.env.OAUTH_KV))) {
-		const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_KV);
-		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
-		return redirectToGoogle(c.req.raw, c.env.GOOGLE_CLIENT_ID, stateToken, { "Set-Cookie": sessionBindingCookie });
-	}
-
-	// Generate CSRF protection for the approval form
+	// Always show the dialog so the user can choose the scope level
 	const { token: csrfToken, setCookie } = generateCSRFProtection();
 
 	return renderApprovalDialog(c.req.raw, {
@@ -74,6 +67,10 @@ app.post("/authorize", async (c) => {
 			return c.text("Invalid request", 400);
 		}
 
+		// Extract scope mode from form
+		const scopeModeRaw = formData.get("scope_mode");
+		const scopeMode: "readonly" | "full" = scopeModeRaw === "readonly" ? "readonly" : "full";
+
 		// Add client to approved list
 		const approvedClientCookie = await addApprovedClient(
 			c.req.raw,
@@ -82,14 +79,14 @@ app.post("/authorize", async (c) => {
 		);
 
 		// Create OAuth state and bind it to this user's session
-		const { stateToken } = await createOAuthState(state.oauthReqInfo, c.env.OAUTH_KV);
+		const { stateToken } = await createOAuthState(state.oauthReqInfo, c.env.OAUTH_KV, scopeMode);
 		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
 
 		const headers = new Headers();
 		headers.append("Set-Cookie", approvedClientCookie);
 		headers.append("Set-Cookie", sessionBindingCookie);
 
-		return redirectToGoogle(c.req.raw, c.env.GOOGLE_CLIENT_ID, stateToken, Object.fromEntries(headers));
+		return redirectToGoogle(c.req.raw, c.env.GOOGLE_CLIENT_ID, stateToken, scopeMode, Object.fromEntries(headers));
 	} catch (error: any) {
 		console.error("POST /authorize error:", error);
 		if (error instanceof OAuthError) {
@@ -103,15 +100,17 @@ function redirectToGoogle(
 	request: Request,
 	googleClientId: string,
 	stateToken: string,
+	scopeMode: "readonly" | "full" = "full",
 	headers: Record<string, string> = {},
 ) {
+	const scope = scopeMode === "readonly" ? GOOGLE_SCOPES_READONLY : GOOGLE_SCOPES_FULL;
 	return new Response(null, {
 		headers: {
 			...headers,
 			location: getUpstreamAuthorizeUrl({
 				client_id: googleClientId,
 				redirect_uri: new URL("/callback", request.url).href,
-				scope: GOOGLE_SCOPES,
+				scope,
 				state: stateToken,
 				upstream_url: GOOGLE_AUTH_URL,
 			}),
@@ -126,11 +125,13 @@ function redirectToGoogle(
  */
 app.get("/callback", async (c) => {
 	let oauthReqInfo: AuthRequest;
+	let scopeMode: "readonly" | "full";
 	let clearSessionCookie: string;
 
 	try {
 		const result = await validateOAuthState(c.req.raw, c.env.OAUTH_KV);
 		oauthReqInfo = result.oauthReqInfo;
+		scopeMode = result.scopeMode;
 		clearSessionCookie = result.clearCookie;
 	} catch (error: any) {
 		if (error instanceof OAuthError) {
@@ -186,6 +187,7 @@ app.get("/callback", async (c) => {
 		props: {
 			accessToken: tokens.access_token,
 			email: userInfo.email || "",
+			mode: scopeMode,
 			name: userInfo.name || "",
 			refreshToken: tokens.refresh_token || "",
 		} as Props,
