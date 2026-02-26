@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
-import { createDriveClient, TokenExpiredError } from "./drive/client";
+import { createDriveClient, TokenExpiredError, InsufficientScopeError } from "./drive/client";
 import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES, MEMORY_ALLOWED_MIMES, MEMORY_MAX_SIZE, MEMORY_ROOT_SEGMENTS } from "./drive/types";
 import type { DriveClient } from "./drive/client";
 import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
@@ -794,6 +794,15 @@ Shared memory (AI/Claude folder on Google Drive):
 				content: [{
 					type: "text" as const,
 					text: "Google access token has expired. Please re-authenticate by reconnecting the MCP server.",
+				}],
+				isError: true,
+			};
+		}
+		if (err instanceof InsufficientScopeError) {
+			return {
+				content: [{
+					type: "text" as const,
+					text: "This operation requires additional Google Drive permissions (drive.file scope) that were not granted in your current session. Please disconnect and reconnect this MCP server — you'll be prompted to grant the additional permission.",
 				}],
 				isError: true,
 			};

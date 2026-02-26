@@ -10,6 +10,13 @@ export class TokenExpiredError extends Error {
 	}
 }
 
+export class InsufficientScopeError extends Error {
+	constructor(message = "Insufficient Google Drive permissions") {
+		super(message);
+		this.name = "InsufficientScopeError";
+	}
+}
+
 export function createDriveClient(accessToken: string) {
 	async function driveRequest(url: string, init?: RequestInit): Promise<Response> {
 		const resp = await fetch(url, {
@@ -22,6 +29,14 @@ export function createDriveClient(accessToken: string) {
 
 		if (resp.status === 401) {
 			throw new TokenExpiredError();
+		}
+
+		if (resp.status === 403) {
+			const text = await resp.text();
+			if (text.includes("insufficientPermissions")) {
+				throw new InsufficientScopeError();
+			}
+			throw new Error(`Drive API error 403: ${text}`);
 		}
 
 		if (!resp.ok) {
