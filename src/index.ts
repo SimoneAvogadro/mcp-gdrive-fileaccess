@@ -64,9 +64,11 @@ Image workflow (DOCX, PPTX & PDF):
 • Works with DOCX, PPTX, and PDF files. PDF images are extracted as PNG.
 
 Shared memory (AI/Claude folder on Google Drive):
-• Use write_memory_file, read_memory_file, list_memory_files, delete_memory_file to store and retrieve notes and reference material SHARED between Claude Code, Claude Desktop, and Claude Web.
-• All memory files live in a managed "AI/Claude" folder on the user's Google Drive. Organize by project using subfolders (e.g., "myproject/architecture.md").
-• This is NOT a replacement for CLAUDE.md (project-local context in Claude Code) or Claude's built-in conversation memory. Use it only for content that genuinely needs to cross context boundaries or be accessible to the user directly via Google Drive.
+• Use write_memory_file, read_memory_file, list_memory_files, delete_memory_file to persist knowledge ACROSS projects and ACROSS Claude clients (Claude Code, Claude Desktop, Claude Web).
+• Unlike CLAUDE.md (which is local to a single project in Claude Code) or Claude's built-in conversation memory (which is per-conversation), this memory lives on the user's Google Drive in an "AI/Claude" folder and is accessible from ANY Claude client and ANY project.
+• Use cases: cross-project context (e.g., architectural decisions that apply to multiple repos), user preferences that should follow them everywhere, shared reference material, handoff notes between Claude Code and Claude Web sessions.
+• Organize by project or topic using subfolders (e.g., "myproject/architecture.md", "preferences/coding-style.md").
+• Only use this for content that genuinely needs to persist across project/client boundaries. For project-local context, prefer CLAUDE.md; for conversation-local context, prefer built-in memory.
 
 Uploading files (upload_file):
 • Creates a NEW file on Google Drive — never overwrites existing files with the same name.
@@ -621,7 +623,7 @@ Uploading files (upload_file):
 
 		this.memoryTools.push(this.server.tool(
 			"write_memory_file",
-			"Write or update a text file in the shared AI/Claude folder on Google Drive. This folder is accessible from Claude Code, Claude Desktop, and Claude Web — use it for notes, reference material, or context that genuinely needs to cross boundaries between these tools. NOT a replacement for CLAUDE.md (project-local) or conversation memory. Supports .txt and .md files. Organize by project/topic using subfolders (e.g., \"myproject/architecture.md\").",
+			"Write or update a text file in the shared AI/Claude folder on Google Drive. Use this to persist knowledge ACROSS projects and ACROSS Claude clients (Claude Code, Claude Desktop, Claude Web). Ideal for cross-project context, user preferences, shared reference material, or handoff notes between sessions. NOT a replacement for CLAUDE.md (project-local) or conversation memory. Supports .txt and .md files. Organize by project/topic using subfolders (e.g., \"myproject/architecture.md\").",
 			{
 				path: z.string().describe("Relative path within AI/Claude (e.g., \"notes.md\" or \"myproject/design.md\")"),
 				content: z.string().describe("Text content to write"),
@@ -657,7 +659,7 @@ Uploading files (upload_file):
 
 		this.memoryTools.push(this.server.tool(
 			"read_memory_file",
-			"Read a text file from the shared AI/Claude folder on Google Drive. Returns the file's text content.",
+			"Read a text file from the shared AI/Claude folder on Google Drive. Use this to retrieve cross-project and cross-client memory persisted by any Claude client (Claude Code, Claude Desktop, Claude Web).",
 			{
 				path: z.string().describe("Relative path within AI/Claude (e.g., \"notes.md\" or \"myproject/design.md\")"),
 			},
@@ -687,7 +689,7 @@ Uploading files (upload_file):
 
 		this.memoryTools.push(this.server.tool(
 			"list_memory_files",
-			"List files and subfolders in the shared AI/Claude folder on Google Drive. Optionally specify a subfolder path.",
+			"List files and subfolders in the shared AI/Claude memory folder on Google Drive. Shows cross-project and cross-client memory files persisted by any Claude client. Optionally specify a subfolder path.",
 			{
 				path: z.string().optional().describe("Subfolder path within AI/Claude (e.g., \"myproject\"). Omit to list the root AI/Claude folder."),
 			},
@@ -749,7 +751,7 @@ Uploading files (upload_file):
 
 		this.memoryTools.push(this.server.tool(
 			"delete_memory_file",
-			"Permanently delete a file from the shared AI/Claude folder on Google Drive.",
+			"Permanently delete a file from the shared AI/Claude memory folder on Google Drive. Removes cross-project/cross-client memory that is no longer needed.",
 			{
 				path: z.string().describe("Relative path within AI/Claude (e.g., \"notes.md\" or \"myproject/old-notes.md\")"),
 			},
