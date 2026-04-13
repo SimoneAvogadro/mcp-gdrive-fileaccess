@@ -4,7 +4,7 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { createDriveClient, TokenExpiredError, InsufficientScopeError } from "./drive/client";
-import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES, MEMORY_ALLOWED_MIMES, MEMORY_MAX_SIZE, MEMORY_ROOT_SEGMENTS, UPLOAD_ALLOWED_EXTENSIONS } from "./drive/types";
+import { GOOGLE_MIME, OFFICE_MIME, OTHER_MIME, TEXT_EXTRACTABLE_MIMES, SPREADSHEET_MIMES, MEMORY_ALLOWED_MIMES, MEMORY_MAX_SIZE, MEMORY_ROOT_SEGMENTS, UPLOAD_ALLOWED_EXTENSIONS, TEXT_DECODABLE_APP_MIMES } from "./drive/types";
 import type { DriveClient } from "./drive/client";
 import { parseSpreadsheetToCSV } from "./parsers/spreadsheet";
 import { parseDocxWithImages } from "./parsers/docx";
@@ -32,8 +32,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 	return btoa(binary);
 }
 
-function isTextMime(mimeType: string): boolean {
-	return mimeType.startsWith("text/");
+function isTextDecodable(mimeType: string): boolean {
+	return mimeType.startsWith("text/") || TEXT_DECODABLE_APP_MIMES.has(mimeType);
 }
 
 export class OfficeMCP extends McpAgent<CloudflareEnv, Record<string, never>, Props> {
@@ -243,8 +243,8 @@ Uploading files (upload_file):
 							};
 						}
 
-						// Text files (plain, CSV, HTML, XML) → return as text content
-						if (isTextMime(mimeType)) {
+						// Text-decodable files (plain, CSV, HTML, XML, JSON, YAML, JS, SQL, RTF, …) → return as text content
+						if (isTextDecodable(mimeType)) {
 							console.log(`[download_file] downloading text file`);
 							const buffer = await drive.downloadFile(file.id);
 							const text = new TextDecoder().decode(buffer);
@@ -295,7 +295,7 @@ Uploading files (upload_file):
 						return {
 							content: [{
 								type: "text",
-								text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML), and images.`,
+								text: `Unsupported file type: ${mimeType}. Supported types: Office documents (DOC, DOCX, XLS, XLSX, PPT, PPTX), PDF, ODT, ODS, text files (TXT, CSV, HTML, XML, JSON, YAML, JS, TS, PY, SH, SQL, RTF), and images.`,
 							}],
 							isError: true,
 						};
@@ -832,7 +832,7 @@ Uploading files (upload_file):
 
 					// Encode content to bytes
 					let bytes: Uint8Array;
-					if (mimeType.startsWith("text/") || mimeType === "text/markdown") {
+					if (isTextDecodable(mimeType) || mimeType === "text/markdown") {
 						bytes = new TextEncoder().encode(content);
 					} else {
 						try {

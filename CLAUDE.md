@@ -38,7 +38,7 @@ Runs on Cloudflare Workers with `nodejs_compat`. Uses:
 1. **`search_drive(query)`** — Full-text search in Google Drive
 2. **`list_folder(folder_id?)`** — List files in a folder (root by default)
 3. **`download_file(file_id?, file_name?)`** — Download a file in its native format:
-   - Text files (TXT, CSV, HTML, XML) → returned as inline text
+   - Text files (TXT, CSV, HTML, XML, JSON, YAML, JS, TS, PY, SH, SQL, RTF) → returned as inline text
    - Images → returned as inline MCP image content (base64)
    - Binary files (Office, PDF, ODT, ODS) → stored in KV and returned as a one-time download URL (`/blob/:id`, expires in 5 minutes, deleted after first download)
    - Google Workspace files → error (use built-in Claude Google Drive integration)
@@ -96,7 +96,7 @@ Security: CSRF tokens via HttpOnly cookies, session binding between auth steps, 
 
 ### Type Definitions (`src/drive/types.ts`)
 
-MIME type maps (`GOOGLE_MIME`, `OFFICE_MIME`, `OTHER_MIME`), `SPREADSHEET_MIMES` (XLSX only), `TEXT_EXTRACTABLE_MIMES` (DOCX, PPTX, XLSX, PDF), `UPLOAD_ALLOWED_EXTENSIONS` (extension → MIME for upload validation), and `DriveFile` / `DriveFileList` interfaces.
+MIME type maps (`GOOGLE_MIME`, `OFFICE_MIME`, `OTHER_MIME`), `SPREADSHEET_MIMES` (XLSX only), `TEXT_EXTRACTABLE_MIMES` (DOCX, PPTX, XLSX, PDF), `TEXT_DECODABLE_APP_MIMES` (application/* MIME types that are text-decodable: JSON, XML, JS, YAML, SQL, RTF, shell, TS), `UPLOAD_ALLOWED_EXTENSIONS` (extension → MIME for upload validation), and `DriveFile` / `DriveFileList` interfaces.
 
 ### Utilities (`src/utils.ts`)
 

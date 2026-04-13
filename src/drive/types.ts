@@ -77,7 +77,28 @@ export const UPLOAD_ALLOWED_EXTENSIONS: Record<string, string> = {
 	".gif": "image/gif",
 	".webp": "image/webp",
 	".svg": "image/svg+xml",
+	".json": "application/json",
+	".yaml": "application/x-yaml",
+	".yml": "application/x-yaml",
+	".js": "application/javascript",
+	".ts": "application/typescript",
+	".py": "text/x-python",
+	".sh": "application/x-sh",
+	".sql": "application/sql",
+	".rtf": "application/rtf",
 };
+
+// MIME types under application/* that are text-decodable (not binary)
+export const TEXT_DECODABLE_APP_MIMES: Set<string> = new Set([
+	"application/json",
+	"application/xml",
+	"application/javascript",
+	"application/x-yaml",
+	"application/sql",
+	"application/rtf",
+	"application/x-sh",
+	"application/typescript",
+]);
 
 // Shared memory file constants
 export const MEMORY_ALLOWED_MIMES: Record<string, string> = {
