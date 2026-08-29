@@ -13,6 +13,73 @@ import {
 	validateOAuthState,
 } from "./workers-oauth-utils";
 
+/**
+ * The authorization code is delivered to whatever redirect_uri survives
+ * validation — the provider builds `new URL(redirectUri)` with the code
+ * appended and redirects there. The provider only checks the URI against the
+ * requesting client's OWN registered URIs, which an attacker controls, so this
+ * allowlist is what actually decides where a code can land.
+ *
+ * Exact match only. Never startsWith or a host-prefix test: those are defeated
+ * by claude.ai.evil.example and by claude.ai@evil.example.
+ *
+ * Configurable via the ALLOWED_REDIRECT_URIS worker secret/var (comma-separated,
+ * exact-match URIs) — see README "Redirect URI allowlist". Unset falls back to
+ * the two hardcoded URIs below: an absent setting must never mean "no
+ * allowlist" (that would defeat the fix) or "reject everything" (that bricks
+ * every existing deployment on upgrade). The security property — an unlisted
+ * URI is refused — holds either way; only which URIs start out listed differs.
+ */
+const DEFAULT_ALLOWED_REDIRECT_URIS = [
+	"https://claude.ai/api/mcp/auth_callback",
+	"https://claude.com/api/mcp/auth_callback",
+];
+
+function getAllowedRedirectUris(env: CloudflareEnv): Set<string> {
+	const raw = env.ALLOWED_REDIRECT_URIS;
+	if (!raw) return new Set(DEFAULT_ALLOWED_REDIRECT_URIS);
+	const uris = raw
+		.split(",")
+		.map((uri) => uri.trim())
+		.filter(Boolean);
+	return uris.length > 0 ? new Set(uris) : new Set(DEFAULT_ALLOWED_REDIRECT_URIS);
+}
+
+/**
+ * Opt-in RFC 8252 loopback support, off by default. CLI clients such as
+ * Claude Code build their redirect_uri as `http://localhost:<ephemeral
+ * port>/callback` — a different port on every run — which an exact-match
+ * allowlist can never express. Enable with ALLOW_LOOPBACK_REDIRECT="true".
+ *
+ * Parses the URL and checks protocol/hostname/pathname as distinct fields
+ * rather than any prefix or substring test on the raw string; port is the
+ * only field left unconstrained. This must never be loosened to accept a
+ * non-loopback host.
+ */
+function isAllowedLoopbackRedirect(uri: string, env: CloudflareEnv): boolean {
+	if (env.ALLOW_LOOPBACK_REDIRECT !== "true") return false;
+
+	let parsed: URL;
+	try {
+		parsed = new URL(uri);
+	} catch {
+		return false;
+	}
+
+	if (parsed.protocol !== "http:") return false;
+	if (!["127.0.0.1", "[::1]", "localhost"].includes(parsed.hostname)) return false;
+	if (parsed.pathname !== "/callback") return false;
+
+	return true;
+}
+
+function isAllowedRedirectUri(uri: string, env: CloudflareEnv): boolean {
+	return getAllowedRedirectUris(env).has(uri) || isAllowedLoopbackRedirect(uri, env);
+}
+
+const REDIRECT_URI_REJECTION_MESSAGE =
+	"redirect_uri not allowlisted — add it to the ALLOWED_REDIRECT_URIS setting (exact match, never a prefix).";
+
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
@@ -26,6 +93,16 @@ app.get("/authorize", async (c) => {
 	const { clientId } = oauthReqInfo;
 	if (!clientId) {
 		return c.text("Invalid request", 400);
+	}
+
+	// The redirect_uri is the delivery address of the authorization code (see
+	// completeAuthorization below); the provider only validates it against the
+	// requesting client's own registered URIs, which an attacker controls.
+	// Gate here so the owner never even sees a consent dialog for a client
+	// whose code could not be delivered legitimately.
+	if (!isAllowedRedirectUri(oauthReqInfo.redirectUri, c.env)) {
+		console.warn(`Rejected redirect_uri at GET /authorize (not allowlisted): ${oauthReqInfo.redirectUri}`);
+		return c.text(REDIRECT_URI_REJECTION_MESSAGE, 400);
 	}
 
 	// Always show the dialog so the user can choose the scope level
@@ -65,6 +142,16 @@ app.post("/authorize", async (c) => {
 
 		if (!state.oauthReqInfo || !state.oauthReqInfo.clientId) {
 			return c.text("Invalid request", 400);
+		}
+
+		// state came from an attacker-suppliable, unsigned form field (atob +
+		// JSON.parse above) — a forged state carrying a non-allowlisted
+		// redirectUri would otherwise sail straight into createOAuthState and
+		// get written to KV, with only the /callback gate left to catch it.
+		// Same allowlist, same rejection, as GET /authorize.
+		if (!isAllowedRedirectUri(state.oauthReqInfo.redirectUri, c.env)) {
+			console.warn(`Rejected redirect_uri at POST /authorize (not allowlisted): ${state.oauthReqInfo.redirectUri}`);
+			return c.text(REDIRECT_URI_REJECTION_MESSAGE, 400);
 		}
 
 		// Extract scope mode from form
@@ -143,6 +230,16 @@ app.get("/callback", async (c) => {
 
 	if (!oauthReqInfo.clientId) {
 		return c.text("Invalid OAuth request data", 400);
+	}
+
+	// Belt to the /authorize gates' braces (both GET and POST /authorize carry
+	// this same check): this guards the step that actually mints and delivers
+	// the code (fetchUpstreamAuthToken below leads directly into
+	// completeAuthorization's `new URL(oauthReqInfo.redirectUri)` redirect). A
+	// bypass of either /authorize check must not be able to reach here.
+	if (!isAllowedRedirectUri(oauthReqInfo.redirectUri, c.env)) {
+		console.warn(`Rejected redirect_uri at /callback (not allowlisted): ${oauthReqInfo.redirectUri}`);
+		return c.text(REDIRECT_URI_REJECTION_MESSAGE, 400);
 	}
 
 	// Exchange code for tokens

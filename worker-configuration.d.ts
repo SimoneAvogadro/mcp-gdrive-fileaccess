@@ -7,4 +7,6 @@ interface CloudflareEnv {
 	MCP_OBJECT: DurableObjectNamespace<import("./src/index").OfficeMCP>;
 	WHITELIST_USERS?: string;
 	WHITELIST_DOMAINS?: string;
+	ALLOWED_REDIRECT_URIS?: string;
+	ALLOW_LOOPBACK_REDIRECT?: string;
 }

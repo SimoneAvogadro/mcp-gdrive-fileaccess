@@ -136,7 +136,7 @@ Cloudflare Worker
 2. Create a project (or select an existing one)
 3. Enable the **Google Drive API** (here: https://console.cloud.google.com/apis/api/drive.googleapis.com)
 4. Under **APIs & Services > Credentials**, create an **OAuth 2.0 Client ID** (Web application)
-5. Add your worker URL + `/callback` as an authorized redirect URI (e.g. `https://your-worker.workers.dev/callback`)
+5. Add your worker URL + `/callback` as an authorized redirect URI (e.g. `https://your-worker.workers.dev/callback`) — this is the **Google-side** redirect URI (where Google sends the user back to *this worker*). It is separate from, and unaffected by, the `ALLOWED_REDIRECT_URIS` allowlist described below, which governs where *this worker* is allowed to send the user back to their MCP client (claude.ai, Claude Code, etc.) once Google auth completes. Don't conflate the two.
 6. Copy the Client ID and Client Secret into your `.dev.vars` / worker secrets
 
 > **Note:** This server requests `drive.readonly` (search, list, download) and `drive.file` (memory tools — lets the app create and manage its own files in an `AI/Claude` folder). The `drive.file` scope **cannot** access files you created outside the app. When setting up the OAuth consent screen, add both `https://www.googleapis.com/auth/drive.readonly` and `https://www.googleapis.com/auth/drive.file`.
@@ -154,6 +154,18 @@ https://<your-worker-name>.<your-account>.workers.dev/mcp
 For example, if your worker is named `mcp-gdrive-fileaccess` and your Cloudflare account subdomain is `johndoe`, the URL would be `https://mcp-gdrive-fileaccess.johndoe.workers.dev/mcp`.
 
 > **Important:** the URL must end with `/mcp`. Using `/sse` or the bare domain will not work.
+
+---
+
+### Redirect URI allowlist
+
+This worker only completes an OAuth authorization if the MCP client's `redirect_uri` is on an **exact-match allowlist**. This closes a confused-deputy hole: client registration on this provider is open (both dynamic client registration and client-ID-metadata-document registration let anyone register a client with a redirect_uri of their choosing), so without a server-side pin, an attacker could register a client pointed at their own callback, send the account owner an otherwise normal-looking authorization link, and — if the owner approved it — receive an MCP token carrying the owner's Google tokens. Because `search_drive` and `list_folder` run with `corpora: allDrives`, that token gives full-text search and browsing across the owner's entire Drive, including shared files.
+
+- Exact match only, never a prefix, suffix, or substring test. A fork that "simplifies" this to something like `redirectUri.startsWith("https://claude.ai")` reopens the hole: `https://claude.ai.evil.example/...` and `https://claude.ai@evil.example/...` both satisfy that prefix check while pointing at an attacker's host.
+- Unset, the allowlist defaults to the two claude.ai / claude.com callback URIs used by claude.ai's web and mobile clients — nothing to configure for that path.
+- Add more callback URIs by setting `ALLOWED_REDIRECT_URIS` as a worker secret/var: a comma-separated list of exact URIs (`npx wrangler secret put ALLOWED_REDIRECT_URIS`).
+- **Claude Code (CLI) needs this configured, and `ALLOWED_REDIRECT_URIS` alone can't cover it.** The CLI builds its redirect_uri as `http://localhost:<ephemeral port>/callback` — a different port on every run — which no fixed, exact-match allowlist entry can match. Instead set `ALLOW_LOOPBACK_REDIRECT="true"` (`npx wrangler secret put ALLOW_LOOPBACK_REDIRECT`), which accepts *any* port on a loopback host (`127.0.0.1`, `[::1]`, or `localhost`) with the exact `/callback` path — everything else about the URI is still checked, and non-loopback hosts are never accepted regardless of this setting. Off by default. See [Claude Code (CLI)](#claude-code-cli) below.
+- A request with a redirect_uri that isn't allowlisted gets a `400` naming the fix — see [Troubleshooting](#troubleshooting).
 
 ---
 
@@ -179,6 +191,8 @@ You're done. In any chat you can now ask Claude to search, browse, or download f
 ### Claude Code (CLI)
 
 Claude Code connects to remote MCP servers over HTTP with OAuth. No API keys or manual tokens needed — Claude Code handles the OAuth flow in your browser automatically.
+
+> **Requires `ALLOW_LOOPBACK_REDIRECT` set on the worker.** Claude Code's OAuth redirect is `http://localhost:<ephemeral port>/callback`, and the port changes every run, so this path does **not** work against the default redirect_uri allowlist — see [Redirect URI allowlist](#redirect-uri-allowlist) above. Set `ALLOW_LOOPBACK_REDIRECT="true"` on the worker before trying to connect from Claude Code.
 
 #### Option A — Project-level config (recommended for shared projects)
 
@@ -230,7 +244,9 @@ If you were connected before the memory tools were added, your existing session 
 3. Google will show an incremental consent screen asking for the additional `drive.file` permission
 4. Approve, and the memory tools will work
 
-On claude.ai: go to **Settings → Integrations**, disconnect the integration, then re-add it.
+> **If you deployed the redirect_uri allowlist (this version) without also setting `ALLOW_LOOPBACK_REDIRECT`, step 2 will fail.** Disconnect always succeeds (it's purely local), but reconnecting drives Claude Code back through `/authorize` with its ephemeral-port loopback redirect_uri, which a default deployment now rejects with a `400`. Set `ALLOW_LOOPBACK_REDIRECT="true"` on the worker (see [Redirect URI allowlist](#redirect-uri-allowlist)) *before* disconnecting, so you don't get stuck disconnected with no way back in.
+
+On claude.ai: go to **Settings → Integrations**, disconnect the integration, then re-add it. (claude.ai's callback URI is in the allowlist by default, so this path is unaffected.)
 
 ---
 
@@ -238,6 +254,7 @@ On claude.ai: go to **Settings → Integrations**, disconnect the integration, t
 
 - **"McpEndpointNotFound"** after successful Google auth — make sure the URL ends with `/mcp`
 - **403 "Insufficient permissions"** on memory tools — you need to disconnect and reconnect to grant the `drive.file` scope (see [Updating permissions](#updating-permissions) above)
+- **`400 redirect_uri not allowlisted — add it to the ALLOWED_REDIRECT_URIS setting (exact match, never a prefix).`** — the MCP client's redirect_uri isn't on this worker's [redirect URI allowlist](#redirect-uri-allowlist). For claude.ai/claude.com this shouldn't happen out of the box; for any other client (including Claude Code — see its section above) add the exact redirect_uri to the `ALLOWED_REDIRECT_URIS` worker secret/var, or, for a loopback CLI client, set `ALLOW_LOOPBACK_REDIRECT="true"`. Do not "fix" this by loosening the check to a prefix/startsWith match — that reopens the vulnerability this allowlist exists to close.
 - **View live logs** from the deployed worker:
   ```bash
   npx wrangler tail

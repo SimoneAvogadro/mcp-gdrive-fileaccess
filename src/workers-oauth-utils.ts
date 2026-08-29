@@ -193,6 +193,18 @@ export function renderApprovalDialog(
 	const clientName = client?.clientName ? sanitizeText(client.clientName) : "Unknown Client";
 	const logoUrl = server.logo ? sanitizeText(sanitizeUrl(server.logo)) : "";
 
+	// clientName is attacker-chosen and, on its own, tells the owner nothing
+	// about where the authorization code would actually go. Surface the ONE
+	// redirect_uri this specific request will actually be delivered to —
+	// state.oauthReqInfo.redirectUri, not client.redirectUris. A client can
+	// register many URIs (e.g. one legitimate, one attacker-controlled) and
+	// request any one of them per-authorization; showing the full registered
+	// list here would put an unrelated, alarming URI in front of the owner
+	// while a large CIMD document could inflate it to thousands of characters.
+	// Allowlist-enforced server-side regardless — this is one more signal for
+	// the owner to notice something wrong before approving.
+	const sanitizedRedirectUri = sanitizeText(sanitizeUrl(state.oauthReqInfo.redirectUri));
+
 	const htmlContent = `
     <!DOCTYPE html>
     <html lang="en">
@@ -225,6 +237,7 @@ export function renderApprovalDialog(
           .button { padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 500; cursor: pointer; border: none; font-size: 1rem; }
           .button-primary { background-color: #0070f3; color: white; }
           .button-secondary { background-color: transparent; border: 1px solid #e5e7eb; color: #333; }
+          .redirect-info { font-size: 0.8rem; color: #6b7280; word-break: break-all; margin-top: -0.5rem; }
           .scope-choice { margin: 1.5rem 0; }
           .scope-choice legend { font-weight: 500; margin-bottom: 0.75rem; font-size: 0.95rem; }
           .scope-option { display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer; }
@@ -247,6 +260,7 @@ export function renderApprovalDialog(
           <div class="card">
             <h2 class="alert"><strong>${clientName}</strong> is requesting access</h2>
             <p>This MCP Client is requesting to be authorized on ${serverName}. If you approve, you will be redirected to sign in with Google.</p>
+            ${sanitizedRedirectUri ? `<p class="redirect-info">Redirect URI: ${sanitizedRedirectUri}</p>` : ""}
             <form method="post" action="${new URL(request.url).pathname}">
               <input type="hidden" name="state" value="${encodedState}">
               <input type="hidden" name="csrf_token" value="${csrfToken}">
